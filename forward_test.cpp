@@ -2,82 +2,93 @@
 #include <cstdlib>
 #include <ctime>
 #include <cstring>
+#include <string>
+#include <cstdint>
+
 #include "firmware/config.h"
 #include "firmware/typedefs.h"
-#include "firmware/forward.h"
-
-// tokenizer functions
-extern void build_tokenizer(Tokenizer *t, std::string tokenizer_path, int vocab_size);
-extern void free_tokenizer(Tokenizer *t);
-extern void encode(Tokenizer *t, char *text, int8_t bos, int8_t eos, int *tokens, int *n_tokens);
-extern char *decode(Tokenizer *t, int prev_token, int token);
-extern void safe_printf(char *piece);
-
-// transformer loader
-extern void build_transformer(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *t, std::string checkpoint_path);
-
-// sampling
-extern int sample(float *logits, int vocab_size, float temperature, float topp, unsigned long long *rng_state);
+#include "firmware/forward.h"              
+#include "firmware/tokenizer.h"            
+#include "firmware/sampling.h"             
+#include "firmware/transformer_loader.h"   
 
 int main() {
-    std::string checkpoint_path = "stories110M.bin";
-    std::string tokenizer_path = "tokenizer.bin";
-    char prompt[] = "Hello";
-    int steps = 64;
+    // 模型与分词器文件
+    const std::string checkpoint_path = "stories110M.bin";
+    const std::string tokenizer_path  = "tokenizer.bin";
+    const char *prompt                = "Hello";
+    const int   steps                 = 64;
 
-    // build transformer model
-    static Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> transformer;
+    // 1) 加载模型
+    static Transformer<
+        dim, hidden_dim, n_layers, n_heads,
+        n_kv_heads, vocab_size, seq_len, GS
+    > transformer;
     build_transformer(&transformer, checkpoint_path);
 
-    // build tokenizer
+    // 2) 初始化分词器
     Tokenizer tokenizer;
     build_tokenizer(&tokenizer, tokenizer_path, transformer.config.vocab_size);
 
-    // encode prompt
-    int *prompt_tokens = new int[strlen(prompt) + 3];
-    int num_prompt_tokens = 0;
-    encode(&tokenizer, prompt, 1, 0, prompt_tokens, &num_prompt_tokens);
+    // 3) 对 prompt 做 tokenize
+    int prompt_len        = std::strlen(prompt);
+    int *prompt_tokens    = new int[prompt_len + 3];
+    int  num_prompt_tokens= 0;
+    encode(&tokenizer,
+           prompt,
+           /*bos=*/1, /*eos=*/0,
+           prompt_tokens,
+           &num_prompt_tokens);
 
-    // sampling params
-    unsigned long long rng_seed = (unsigned long long)time(NULL);
+    // 4) 采样参数
+    unsigned long long rng_seed = (unsigned long long)std::time(nullptr);
     float temperature = 1.0f;
-    float topp = 1.0f;
+    float topp        = 1.0f;
 
-    // allocate buffers
-    float *logits = new float[vocab_size];
-    int kv_dim = (dim * n_kv_heads) / n_heads;
-    float *key_cache = new float[n_layers * seq_len * kv_dim]();
+    // 5) 分配缓存与输出 buffer
+    float *logits      = new float[vocab_size];
+    constexpr int kv_dim = (dim * n_kv_heads) / n_heads;
+    float *key_cache   = new float[n_layers * seq_len * kv_dim]();
     float *value_cache = new float[n_layers * seq_len * kv_dim]();
 
-    int token = prompt_tokens[0];
-    int pos = 0;
-    int next;
-
+    // 6) generation loop
+    int token_id = prompt_tokens[0];
+    int pos      = 0;
     while (pos < steps) {
-        forward(&transformer, token, pos, key_cache, value_cache, logits);
+        // HLS kernel 调用
+        forward(&transformer,
+                token_id,
+                pos,
+                key_cache,
+                value_cache,
+                logits);
 
-        if (pos < num_prompt_tokens - 1) {
-            next = prompt_tokens[pos + 1];
-        } else {
-            next = sample(logits, vocab_size, temperature, topp, &rng_seed);
-        }
+        // 前几个 token 强制用 prompt 的
+        int next = (pos < num_prompt_tokens - 1)
+                 ? prompt_tokens[pos + 1]
+                 : sample(logits,
+                          transformer.config.vocab_size,
+                          temperature,
+                          topp,
+                          &rng_seed);
 
-        char *piece = decode(&tokenizer, token, next);
+        // 解码并打印
+        char *piece = decode(&tokenizer, token_id, next);
         safe_printf(piece);
-        fflush(stdout);
+        std::fflush(stdout);
 
-        if (next == 1) break;
-        token = next;
+        if (next == 1) break;  // 遇到 BOS(token=1) 就结束
+        token_id = next;
         pos++;
     }
+    std::printf("\n");
 
-    printf("\n");
-
-    // clean up
+    // 7) 清理
     delete[] logits;
     delete[] key_cache;
     delete[] value_cache;
     delete[] prompt_tokens;
     free_tokenizer(&tokenizer);
+
     return 0;
 }

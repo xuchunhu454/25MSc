@@ -3,7 +3,7 @@
 #include <cstring>
 
 // TODO: include HLS math package
-
+#include <cmath>
 // neural net blocks; the dynamics of the Transformer
 template <int S>
 
