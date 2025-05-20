@@ -14,10 +14,10 @@
 
 int main() {
     // 模型与分词器文件
-    const std::string checkpoint_path = "stories110M.bin";
-    const std::string tokenizer_path  = "tokenizer.bin";
-    const char *prompt                = "Hello";
-    const int   steps                 = 64;
+    std::string checkpoint_path = "stories110M.bin";
+    std::string tokenizer_path  = "tokenizer.bin";
+    char *prompt                = "Hello";
+    int   steps                 = 64;
 
     // 1) 加载模型
     static Transformer<
