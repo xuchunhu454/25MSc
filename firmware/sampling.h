@@ -30,8 +30,6 @@ void build_sampler(
 
 void free_sampler(Sampler *sampler);
 
-int sample(Sampler *sampler, float *logits);
-
 int sample(
     float               *logits,
     int                  vocab_size,
