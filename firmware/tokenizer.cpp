@@ -8,6 +8,18 @@
 // ———– 以下函数体，原封不动拷贝自你 llama2.cpp 中 “The Byte Pair Encoding (BPE) Tokenizer” 部分 ———–
 // 包括：build_tokenizer(), free_tokenizer(), encode(), decode(), safe_printf()
 // 你只要把 llama2.cpp 对应的实现整段剪下来，粘到这里即可。
+int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size)
+{
+  // efficiently find the perfect match for str in vocab, return its index or -1 if not found
+  TokenIndex tok = {.str = str}; // acts as the key to search for
+  TokenIndex *res = (TokenIndex *)bsearch(&tok, sorted_vocab, vocab_size, sizeof(TokenIndex), compare_tokens);
+  return res != NULL ? res->id : -1;
+}
+
+int compare_tokens(const void *a, const void *b)
+{
+  return strcmp(((TokenIndex *)a)->str, ((TokenIndex *)b)->str);
+}
 
 void build_tokenizer(Tokenizer *t, std::string tokenizer_path, int vocab_size)
 {
@@ -253,19 +265,19 @@ void safe_printf(char *piece)
   printf("%s", piece);
 }
 
-extern "C" int sample(
-    float *logits,
-    int    vocab_size,
-    float  temperature,
-    float  topp,
-    unsigned long long *rng_state
-) {
-    // 用内部接口构造一个临时 Sampler
-    Sampler s;
-    build_sampler(&s, vocab_size, temperature, topp, *rng_state);
-    // 真正采样
-    int tok = sample(&s, logits);
-    // 销毁
-    free_sampler(&s);
-    return tok;
-}
+// extern "C" int sample(
+//     float *logits,
+//     int    vocab_size,
+//     float  temperature,
+//     float  topp,
+//     unsigned long long *rng_state
+// ) {
+//     // 用内部接口构造一个临时 Sampler
+//     Sampler s;
+//     build_sampler(&s, vocab_size, temperature, topp, *rng_state);
+//     // 真正采样
+//     int tok = sample(&s, logits);
+//     // 销毁
+//     free_sampler(&s);
+//     return tok;
+// }
