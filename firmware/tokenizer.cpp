@@ -252,3 +252,20 @@ void safe_printf(char *piece)
   }
   printf("%s", piece);
 }
+
+extern "C" int sample(
+    float *logits,
+    int    vocab_size,
+    float  temperature,
+    float  topp,
+    unsigned long long *rng_state
+) {
+    // 用内部接口构造一个临时 Sampler
+    Sampler s;
+    build_sampler(&s, vocab_size, temperature, topp, *rng_state);
+    // 真正采样
+    int tok = sample(&s, logits);
+    // 销毁
+    free_sampler(&s);
+    return tok;
+}

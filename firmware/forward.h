@@ -1,3 +1,5 @@
+#ifndef FIRMWARE_FORWARD_H
+#define FIRMWARE_FORWARD_H
 #include "typedefs.h"
 #include "config.h"
 #include <math.h>
@@ -62,3 +64,4 @@ main_loop:
   std::memcpy(qx->q, quantized_buffer, S * sizeof(int8_t));
   std::memcpy(qx->s, scale_buffer, num_groups * sizeof(float));
 }
+#endif // FIRMWARE_FORWARD_H

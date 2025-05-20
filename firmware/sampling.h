@@ -1,7 +1,11 @@
-#ifndef SAMPLING_H
-#define SAMPLING_H
+#ifndef FIRMWARE_SAMPLING_H
+#define FIRMWARE_SAMPLING_H
 
 #include <cstdint>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct {
     float prob;
@@ -28,4 +32,17 @@ void free_sampler(Sampler *sampler);
 
 int sample(Sampler *sampler, float *logits);
 
-#endif // SAMPLING_H
+int sample(
+    float               *logits,
+    int                  vocab_size,
+    float                temperature,
+    float                topp,
+    unsigned long long  *rng_state
+);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
+#endif // FIRMWARE_SAMPLING_H
+
