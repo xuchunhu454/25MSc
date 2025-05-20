@@ -8,6 +8,12 @@
 // ———– 以下函数体，原封不动拷贝自你 llama2.cpp 中 “The Byte Pair Encoding (BPE) Tokenizer” 部分 ———–
 // 包括：build_tokenizer(), free_tokenizer(), encode(), decode(), safe_printf()
 // 你只要把 llama2.cpp 对应的实现整段剪下来，粘到这里即可。
+
+int compare_tokens(const void *a, const void *b)
+{
+  return strcmp(((TokenIndex *)a)->str, ((TokenIndex *)b)->str);
+}
+
 int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size)
 {
   // efficiently find the perfect match for str in vocab, return its index or -1 if not found
@@ -16,10 +22,6 @@ int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size)
   return res != NULL ? res->id : -1;
 }
 
-int compare_tokens(const void *a, const void *b)
-{
-  return strcmp(((TokenIndex *)a)->str, ((TokenIndex *)b)->str);
-}
 
 void build_tokenizer(Tokenizer *t, std::string tokenizer_path, int vocab_size)
 {
@@ -81,7 +83,7 @@ void free_tokenizer(Tokenizer *t)
   free(t->sorted_vocab);
 }
 
-void encode(Tokenizer *t, char *text, int8_t bos, int8_t eos, int *tokens, int *n_tokens)
+void encode(Tokenizer *t, const char *text, int8_t bos, int8_t eos, int *tokens, int *n_tokens)
 {
   // encode the string text (input) into an upper-bound preallocated tokens[] array
   // bos != 0 means prepend the BOS token (=1), eos != 0 means append the EOS token (=2)
