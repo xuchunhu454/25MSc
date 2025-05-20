@@ -152,11 +152,3 @@ void build_transformer(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_head
   // read in the Config and the Weights from the checkpoint
   read_checkpoint(checkpoint_path, &t->config, &t->weights);
 }
-
-// （可选）在末尾显式实例化：
-template void build_transformer<
-    dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_len,GS
->(
-    Transformer<dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_len,GS>*,
-    const std::string&
-);
