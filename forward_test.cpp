@@ -2,9 +2,9 @@
 #include <cstdlib>
 #include <ctime>
 #include <cstring>
-#include "config.h"
-#include "typedefs.h"
-#include "forward.h"
+#include "firmware/config.h"
+#include "firmware/typedefs.h"
+#include "firmware/forward.h"
 
 // tokenizer functions
 extern void build_tokenizer(Tokenizer *t, std::string tokenizer_path, int vocab_size);
