@@ -4,6 +4,7 @@
 #include <string>
 #include "config.h"
 #include "forward.h"
+#include "transformer_loader.cpp"
 
 // 把 checkpoint.bin 里的权重读到 Transformer 对象里
 template <
