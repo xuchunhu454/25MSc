@@ -155,7 +155,7 @@ set_top ${project_name}
 add_files firmware/${project_name}.cpp -cflags "-std=c++0x"
 add_files -tb ${project_name}_test.cpp -cflags "-std=c++0x"
 add_files firmware/tokenizer.cpp
-# add_files firmware/transformer_loader.cpp
+add_files firmware/transformer_loader.h
 add_files firmware/sampling.cpp
 
 # add_files -tb firmware/weights
