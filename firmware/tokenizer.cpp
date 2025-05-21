@@ -8,6 +8,8 @@
 // ———– 以下函数体，原封不动拷贝自你 llama2.cpp 中 “The Byte Pair Encoding (BPE) Tokenizer” 部分 ———–
 // 包括：build_tokenizer(), free_tokenizer(), encode(), decode(), safe_printf()
 // 你只要把 llama2.cpp 对应的实现整段剪下来，粘到这里即可。
+static int compare_tokens(const void *a, const void *b);
+static int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size);
 
 int compare_tokens(const void *a, const void *b)
 {
