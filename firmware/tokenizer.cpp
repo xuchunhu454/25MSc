@@ -25,7 +25,7 @@ int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size)
 }
 
 
-void build_tokenizer(Tokenizer *t, std::string tokenizer_path, int vocab_size)
+void build_tokenizer(Tokenizer *t, const std::string &tokenizer_path, int vocab_size)
 {
   // i should have written the vocab_size into the tokenizer file... sigh
   t->vocab_size = vocab_size;

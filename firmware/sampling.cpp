@@ -188,3 +188,17 @@ int sample(Sampler *sampler, float *logits)
   return next;
 }
 
+extern "C" int sample(
+    float               *logits,
+    int                  vocab_size,
+    float                temperature,
+    float                topp,
+    unsigned long long  *rng_state
+) {
+    // 用内部 Sampler 流程
+    Sampler s;
+    build_sampler(&s, vocab_size, temperature, topp, *rng_state);
+    int tok = sample(&s, logits);
+    free_sampler(&s);
+    return tok;
+}

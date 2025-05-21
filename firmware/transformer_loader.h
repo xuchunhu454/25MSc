@@ -21,7 +21,7 @@ template <
 >
 void build_transformer(
     Transformer<dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_len,GS> *t,
-    std::string checkpoint_path   // <— 这里跟 cpp 保持一致
+    const std::string& checkpoint_path  
 );
 
 template <int SIZE>

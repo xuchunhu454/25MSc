@@ -22,7 +22,7 @@ typedef struct {
 
 // 构建/销毁
 // 注意：和源码保持一致，第二个参数按值传递
-void build_tokenizer(Tokenizer *t, std::string &tokenizer_path, int vocab_size);
+void build_tokenizer(Tokenizer *t, const std::string &tokenizer_path, int vocab_size);
 void free_tokenizer(Tokenizer *t);
 
 // 编码／解码
