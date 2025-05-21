@@ -2,8 +2,7 @@
 #include <cmath>
 #include <cstdlib>
 
-// ———– 以下函数体，原封不动拷贝自 llama2.cpp 中 random_u32(), random_f32(),
-// sample_argmax(), sample_mult(), sample_topp(), softmax + sample() 本身的实现 ———–
+
 unsigned int random_u32(unsigned long long *state)
 {
   // xorshift rng: https://en.wikipedia.org/wiki/Xorshift#xorshift.2A
@@ -75,7 +74,6 @@ int sample_mult(float *probabilities, int n, float coin)
   return n - 1; // in case of rounding errors
 }
 
-// top-p 逻辑略，可直接拷贝
 
 int compare(const void *a, const void *b)
 {
@@ -195,7 +193,6 @@ extern "C" int sample(
     float                topp,
     unsigned long long  *rng_state
 ) {
-    // 用内部 Sampler 流程
     Sampler s;
     build_sampler(&s, vocab_size, temperature, topp, *rng_state);
     int tok = sample(&s, logits);

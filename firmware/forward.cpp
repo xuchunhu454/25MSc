@@ -2,14 +2,13 @@
 #include "config.h"
 #include <cstring>
 
-// TODO: include HLS math package
 #include <cmath>
 // neural net blocks; the dynamics of the Transformer
 template <int S>
 
 // o = output, x = input, weight = array of gain params
 
-// CHECKED: RMSNorm seems good
+
 void rmsnorm(float o[S], float x[S], float weight[S])
 {
   constexpr auto array_size = S * sizeof(float);

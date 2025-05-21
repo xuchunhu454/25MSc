@@ -6,8 +6,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-// ———– 以下函数体，原封不动拷贝自 llama2.cpp 中关于 read_checkpoint()、memory_map_weights()、init_quantized_tensors()、build_transformer() 的实现 ——
-// 建议直接把那几段代码整个剪下来，钉在这里；记得保留模板声明。
+
 // template <int SIZE>
 // /* initialize `n` x quantized tensor (with `size_each` elements), starting from memory pointed at *ptr */
 // void init_quantized_tensors(void **ptr, QuantizedTensor<SIZE> *tensor, int n, int size_each)

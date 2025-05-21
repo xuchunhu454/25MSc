@@ -11,7 +11,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-// 把 checkpoint.bin 里的权重读到 Transformer 对象里
+
 template <
     int dim, int hidden_dim,
     int n_layers, int n_heads,
