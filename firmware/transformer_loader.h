@@ -21,8 +21,13 @@ template <
 >
 void build_transformer(
     Transformer<dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_len,GS> *t,
-    const std::string& checkpoint_path  
-);
+    //const std::string& checkpoint_path  
+    const std::string checkpoint_path  
+)
+{
+ read_checkpoint(checkpoint_path, &t->config, &t->weights);
+}
+;
 
 template <int SIZE>
 /* initialize `n` x quantized tensor (with `size_each` elements), starting from memory pointed at *ptr */
