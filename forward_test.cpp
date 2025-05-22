@@ -14,7 +14,7 @@
 
 int main() {
     // Model and tokenizer files
-    std::string checkpoint_path = "stories110M.bin";
+    std::string checkpoint_path = "modelq.bin";
     std::string tokenizer_path  = "tokenizer.bin";
     char *prompt                = "Hello";
     int   steps                 = 64;
