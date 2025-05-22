@@ -157,6 +157,8 @@ add_files -tb ${project_name}_test.cpp -cflags "-std=c++0x"
 add_files -tb firmware/tokenizer.cpp -cflags "-std=c++0x"
 add_files -tb firmware/transformer_loader.h  -cflags "-std=c++0x"
 add_files -tb firmware/sampling.cpp -cflags "-std=c++0x"
+add_files -tb stories110M.bin  -cflags "-std=c++0x"
+add_files -tb tokenizer.bin  -cflags "-std=c++0x"
 
 # add_files -tb firmware/weights
 # add_files -tb tb_data
