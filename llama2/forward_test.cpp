@@ -56,12 +56,16 @@ int main() {
     int pos      = 0;
     while (pos < steps) {
         // HLS kernel 
+        printf("[CSIM] Calling forward, pos=%d, token=%d\n", pos, token_id);
+        std::fflush(stdout);
         forward(&transformer,
                 token_id,
                 pos,
                 key_cache,
                 value_cache,
                 logits);
+        printf("[CSIM] Returned from forward, pos=%d\n", pos);
+        std::fflush(stdout);
 
         // The first few tokens are forced to use prompt
         int next = (pos < num_prompt_tokens - 1)
@@ -71,9 +75,14 @@ int main() {
                           temperature,
                           topp,
                           &rng_seed);
+        printf("[CSIM] Sampled next=%d\n", next);
+        std::fflush(stdout);
 
         // decode and print
         char *piece = decode(&tokenizer, token_id, next);
+        printf("[CSIM] Decoded piece=%s\n", piece);
+        std::fflush(stdout);    
+
         safe_printf(piece);
         std::fflush(stdout);
 
