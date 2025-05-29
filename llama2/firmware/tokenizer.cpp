@@ -22,7 +22,7 @@ static void build_sorted_vocab(Tokenizer *t) {
     }
 }
 
-// 二分查找字符串对应的 token id
+// 二分查找
 static int str_lookup(const char *str, Tokenizer *t) {
     int lo = 0, hi = t->vocab_size - 1;
     while (lo <= hi) {
@@ -50,16 +50,17 @@ void build_tokenizer(Tokenizer *t, const std::string &tokenizer_path, int vocab_
     }
     std::fclose(file);
 
+    // 初始化 byte_pieces
     for (int i = 0; i < 256; i++) {
-        t->byte_pieces[i*2]   = static_cast<char>(i);
-        t->byte_pieces[i*2+1] = '\0';
+        t->byte_pieces[i*2]   = static_cast<unsigned char>(i);
+        t->byte_pieces[i*2+1] = 0;
     }
 
     build_sorted_vocab(t);
 }
 
 void free_tokenizer(Tokenizer *t) {
-    // 静态版本无需释放
+    // no-op for static version
     (void)t;
 }
 
@@ -94,15 +95,14 @@ void encode(Tokenizer *t, char *text, int8_t bos, int8_t eos, int *tokens, int *
     // 合并最佳 pair
     while (true) {
         float best_score = -1e10f;
-        int   best_id    = -1;
-        int   best_idx   = -1;
+        int best_id = -1, best_idx = -1;
         for (int i = 0; i + 1 < *n_tokens; i++) {
             std::snprintf(str_buffer, sizeof(str_buffer), "%s%s",
                           t->vocab[tokens[i]], t->vocab[tokens[i+1]]);
-            int id = str_lookup(str_buffer, t);
-            if (id >= 0 && t->vocab_scores[id] > best_score) {
-                best_score = t->vocab_scores[id];
-                best_id    = id;
+            int cid = str_lookup(str_buffer, t);
+            if (cid >= 0 && t->vocab_scores[cid] > best_score) {
+                best_score = t->vocab_scores[cid];
+                best_id    = cid;
                 best_idx   = i;
             }
         }
@@ -123,7 +123,8 @@ char *decode(Tokenizer *t, int prev_token, int token) {
     if (piece[0] == '<') {
         unsigned int b;
         if (std::sscanf(piece, "<0x%02X>", &b) == 1) {
-            piece = t->byte_pieces + (b & 0xFF)*2;
+            // 正确地将 unsigned char* 转为 char*
+            piece = reinterpret_cast<char*>(t->byte_pieces + (b & 0xFF)*2);
         }
     }
     return piece;
