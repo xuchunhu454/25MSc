@@ -13,44 +13,66 @@
 #include "firmware/transformer_loader.h"   
 
 int main() {
+    // 一进 main 就打印
+    fprintf(stderr, ">>> CSIM: entered main()\n");
+    fflush(stderr);
+
     // Model and tokenizer files
     std::string checkpoint_path = "modelq.bin";
     std::string tokenizer_path  = "tokenizer.bin";
-    char *prompt                = "Long time ago, ";
+    const char *prompt          = "Long time ago, ";
     int   steps                 = 64;
 
     // 1) load model
+    fprintf(stderr, ">>> CSIM: before build_transformer\n");
+    fflush(stderr);
     static Transformer<
         dim, hidden_dim, n_layers, n_heads,
         n_kv_heads, vocab_size, seq_len, GS
     > transformer;
     build_transformer(&transformer, checkpoint_path);
+    fprintf(stderr, ">>> CSIM: after build_transformer\n");
+    fflush(stderr);
 
     // 2) initial tokenizer
+    fprintf(stderr, ">>> CSIM: before build_tokenizer\n");
+    fflush(stderr);
     Tokenizer tokenizer;
     build_tokenizer(&tokenizer, tokenizer_path, transformer.config.vocab_size);
+    fprintf(stderr, ">>> CSIM: after build_tokenizer\n");
+    fflush(stderr);
 
     // 3) tokenize the prompt
-    int prompt_len        = std::strlen(prompt);
-    int *prompt_tokens    = new int[prompt_len + 3];
-    int  num_prompt_tokens= 0;
+    fprintf(stderr, ">>> CSIM: before encode, prompt=\"%s\"\n", prompt);
+    fflush(stderr);
+    int prompt_len         = std::strlen(prompt);
+    int *prompt_tokens     = new int[prompt_len + 3];
+    int  num_prompt_tokens = 0;
     encode(&tokenizer,
-           prompt,
+           const_cast<char*>(prompt),
            /*bos=*/1, /*eos=*/0,
            prompt_tokens,
            &num_prompt_tokens);
+    fprintf(stderr, ">>> CSIM: after encode, num_tokens=%d\n", num_prompt_tokens);
+    fflush(stderr);
 
     // 4) Sampling parameters
+    fprintf(stderr, ">>> CSIM: setting sampling params\n");
+    fflush(stderr);
     unsigned long long rng_seed = (unsigned long long)std::time(nullptr);
     float temperature = 1.0f;
     float topp        = 1.0f;
 
     // 5) Allocating cache and output buffer
+    fprintf(stderr, ">>> CSIM: before buffer allocation\n");
+    fflush(stderr);
     float *logits      = new float[vocab_size];
     constexpr int kv_dim = (dim * n_kv_heads) / n_heads;
     float *key_cache   = new float[n_layers * seq_len * kv_dim]();
     float *value_cache = new float[n_layers * seq_len * kv_dim]();
-
+    fprintf(stderr, ">>> CSIM: after buffer allocation\n");
+    fflush(stderr);
+    
     // 6) generation loop
     int token_id = prompt_tokens[0];
     int pos      = 0;
