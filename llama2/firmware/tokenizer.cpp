@@ -30,11 +30,13 @@ static int str_lookup(const char *str, TokenIndex *sorted_vocab, int vocab_size)
     return (res == nullptr) ? -1 : res->id;
 }
 
+// ---------------------------------------------------------------------------
 // 全局静态缓冲区声明：
-// 1) 保存从文件读到的每个子词字符串
-// 2) 保存对应的分数
-// 3) sorted_vocab 用于二分查找；byte_pieces 用于 byte-fallback
-// 4) str_buffer 用于 encode 时合并 candidate
+//  1) 保存从文件读到的每个子词字符串
+//  2) 保存对应的分数
+//  3) sorted_vocab 用于二分查找；byte_pieces 用于 byte-fallback
+//  4) global_str_buffer 用于 encode 合并 candidate
+// ---------------------------------------------------------------------------
 static char           global_vocab[MAX_VOCAB][MAX_TOKEN_LEN + 1];
 static float          global_vocab_scores[MAX_VOCAB];
 static TokenIndex     global_sorted_vocab[MAX_VOCAB];
@@ -57,7 +59,7 @@ void build_tokenizer(Tokenizer *t, const std::string &tokenizer_path, int vocab_
         global_byte_pieces[i * 2]     = (unsigned char)i;
         global_byte_pieces[i * 2 + 1] = 0;
     }
-    // 将全局缓冲的地址复制到结构体中
+    // 将全局缓冲的内容拷贝到 t->byte_pieces
     std::memcpy(t->byte_pieces, global_byte_pieces, sizeof(global_byte_pieces));
 
     // 3) 打开 tokenizer 文件
@@ -115,12 +117,12 @@ void build_tokenizer(Tokenizer *t, const std::string &tokenizer_path, int vocab_
         sizeof(TokenIndex),
         compare_tokens
     );
-    // 拷贝到结构体内
+    // 拷贝到 t->sorted_vocab 中
     std::memcpy(t->sorted_vocab, global_sorted_vocab, sizeof(TokenIndex) * (size_t)vocab_size);
 }
 
 // ---------------------------------------------------------------------------
-// free_tokenizer：由于所有缓冲区均为静态分配，无需释放
+// free_tokenizer：不做任何事情，因为所有缓冲区均为静态分配
 // ---------------------------------------------------------------------------
 void free_tokenizer(Tokenizer *t) {
     (void)t;
@@ -168,7 +170,7 @@ void encode(Tokenizer *t, char *text, int8_t bos, int8_t eos, int *tokens, int *
             (str_len < (size_t)t->max_token_length)) {
             continue;
         }
-        // 此时 local_buf 存放一个完整的 UTF-8 码点或已经达到长度上限
+        // 此时 local_buf 存放一个完整的 UTF-8 码点或已达到长度上限
         int id = str_lookup(local_buf, t->sorted_vocab, t->vocab_size);
         if (id >= 0) {
             tokens[(*n_tokens)++] = id;
@@ -187,13 +189,13 @@ void encode(Tokenizer *t, char *text, int8_t bos, int8_t eos, int *tokens, int *
         int best_id = -1, best_idx = -1;
         for (int i = 0; i + 1 < *n_tokens; i++) {
             std::snprintf(
-                str_buffer,
-                sizeof(str_buffer),
+                global_str_buffer,
+                sizeof(global_str_buffer),
                 "%s%s",
                 t->vocab[tokens[i]],
                 t->vocab[tokens[i + 1]]
             );
-            int cid = str_lookup(str_buffer, t->sorted_vocab, t->vocab_size);
+            int cid = str_lookup(global_str_buffer, t->sorted_vocab, t->vocab_size);
             if (cid >= 0 && t->vocab_scores[cid] > best_score) {
                 best_score = t->vocab_scores[cid];
                 best_id    = cid;
@@ -220,7 +222,7 @@ void encode(Tokenizer *t, char *text, int8_t bos, int8_t eos, int *tokens, int *
 // decode：将单个 token ID 转换为子词片段 (piece)
 //   - 如果 prev_token == BOS (1) 且 piece 以空格开头，需删去空格
 //   - 如果 piece 形如 "<0xXX>"，解析为单原始字节字符串
-//   - 返回指向 t->vocab[token] 或 byte_pieces[b*2] 的指针
+//   - 返回指向 t->vocab[token] 或 t->byte_pieces[b*2] 的指针
 // ---------------------------------------------------------------------------
 char *decode(Tokenizer *t, int prev_token, int token) {
     char *piece = t->vocab[token];
