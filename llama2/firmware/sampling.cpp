@@ -196,6 +196,7 @@ extern "C" int sample(
     Sampler s;
     build_sampler(&s, vocab_size, temperature, topp, *rng_state);
     int tok = sample(&s, logits);
+    *rng_state = s.rng_state;
     free_sampler(&s);
     return tok;
 }
