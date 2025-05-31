@@ -73,10 +73,18 @@ int main() {
     // fprintf(stderr, ">>> CSIM: after buffer allocation\n");
     // fflush(stderr);
 
+
+    // —— 在第一次使用 key_cache 和 value_cache 之前，显式清零
+    std::memset(key_cache,   0, sizeof(float) * (n_layers * seq_len * kv_dim));
+    std::memset(value_cache, 0, sizeof(float) * (n_layers * seq_len * kv_dim));
+
     // 6) generation loop
     int token_id = prompt_tokens[0];
     int pos      = 0;
     while (pos < steps) {
+        // —— 在每次 forward() 调用之前，先把 logits 清零
+        std::memset(logits, 0, sizeof(float) * vocab_size);
+
         // HLS kernel 
         // printf("[CSIM] Calling forward, pos=%d, token=%d\n", pos, token_id);
         // std::fflush(stdout);
