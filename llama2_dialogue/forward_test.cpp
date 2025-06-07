@@ -60,7 +60,7 @@ int main() {
         // 用 prompt 里的每个 token 喂给 forward，只做一次，不 sample
         for (int i = 0; i < num_prompt_tokens; i++) {
             token_id = prompt_tokens[i];
-            std::memset(logits, 0, vocabulary_size * sizeof(float));
+            std::memset(logits, 0, vocab_size * sizeof(float));
             forward(&transformer,
                     token_id,
                     pos,
@@ -88,7 +88,7 @@ int main() {
 
             // 用这个 token 继续 forward
             token_id = next;
-            std::memset(logits, 0, vocabulary_size * sizeof(float));
+            std::memset(logits, 0, vocab_size * sizeof(float));
             forward(&transformer,
                     token_id,
                     pos,
