@@ -12,7 +12,7 @@
 #include "firmware/sampling.h"
 #include "firmware/transformer_loader.h"
 
-// 从 stdin 读一行，带提示
+// Read a line from stdin, with prompt
 static void read_stdin(const char *prompt, char *buf, size_t buf_sz) {
     std::cout << prompt << std::flush;
     if (!std::cin.getline(buf, buf_sz)) {
@@ -20,7 +20,7 @@ static void read_stdin(const char *prompt, char *buf, size_t buf_sz) {
     }
 }
 
-// 完整的 chat 函数，几乎照搬官方版本
+// Complete chat function, almost copied from the official version
 void chat(Transformer<dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_len,GS> *transformer,
           Tokenizer *tokenizer,
           int steps, float temperature, float topp) {
@@ -38,7 +38,7 @@ void chat(Transformer<dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_
 
     while (pos < steps) {
         if (user_turn) {
-            // system/user prompt 同前面一样读取并 render、encode
+            // system/user prompt (read as before) and render、encode
             if (pos==0) {
                 read_stdin("Enter system prompt (optional): ", system_prompt, sizeof(system_prompt));
             }
@@ -55,19 +55,18 @@ void chat(Transformer<dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_
             std::cout << "Assistant> " << std::flush;
         }
 
-        // 取下一个 token
+        // Take the next token
         if (user_idx < num_prompt_tokens) {
             token = prompt_tokens[user_idx++];
         } else {
             token = next;
         }
-        if (token == 2) user_turn = 1;  // EOS 回到用户
+        if (token == 2) user_turn = 1;  // EOS Back to User
 
         // forward
         std::memset(logits, 0, vocab_size*sizeof(float));
         forward(transformer, token, pos, key_cache, value_cache, logits);
 
-        // sample：注意这里调用签名
         next = sample(logits,
                       transformer->config.vocab_size,
                       temperature,
@@ -75,7 +74,7 @@ void chat(Transformer<dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_
                       &rng_seed);
         pos++;
 
-        // 打印模型输出
+        // Print model output
         if (user_idx >= num_prompt_tokens && next != 2) {
             char *piece = decode(tokenizer, token, next);
             safe_printf(piece);
@@ -99,7 +98,6 @@ int main() {
     Tokenizer tokenizer;
     build_tokenizer(&tokenizer, tokf, transformer.config.vocab_size);
 
-    // 直接调用 chat，不用 build_sampler
     chat(&transformer, &tokenizer,
          /*steps=*/64,
          /*temperature=*/1.0f,
