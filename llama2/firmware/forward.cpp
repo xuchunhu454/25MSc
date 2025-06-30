@@ -265,92 +265,150 @@ ws_buff:
 //   }
 // }
 
-template <int N, int D, int BI = 64, int BJ = 64>
-void matmul(
+// template <int N, int D, int BI = 64, int BJ = 64>
+// void matmul_optimized(
+//     float *xout,
+//     const int8_t *xq,
+//     const float *xs,
+//     const int8_t *wq,
+//     const float *ws)
+// {
+//     // 1) 预加载所有权重和 scale 到 on-chip BRAM
+//     static int8_t  w_buffer_full[D][N];
+//     static float   ws_buffer_full[D][N/GS];
+//     #pragma HLS ARRAY_PARTITION variable = w_buffer_full complete dim=2
+//     #pragma HLS ARRAY_PARTITION variable = ws_buffer_full complete dim=2
+
+//     preload_weights:
+//     for (int i = 0; i < D; i++) {
+//         #pragma HLS PIPELINE II=1
+//         memcpy(w_buffer_full[i], wq + i * N, N * sizeof(int8_t));
+//         memcpy(ws_buffer_full[i], ws + (i * N / GS), (N/GS) * sizeof(float));
+//     }
+
+//     // 2) 载入一次 x_buffer, xs_buffer
+//     static int8_t  x_buffer[N];
+//     static float   xs_buffer[N/GS];
+//     #pragma HLS ARRAY_PARTITION variable = x_buffer cyclic factor=16
+//     #pragma HLS ARRAY_PARTITION variable = xs_buffer cyclic factor=4
+
+//     preload_input:
+//     for (int j = 0; j < N; j++) {
+//         #pragma HLS UNROLL factor=16
+//         x_buffer[j] = xq[j];
+//     }
+//     preload_xs:
+//     for (int g = 0; g < N/GS; g++) {
+//         #pragma HLS UNROLL factor=4
+//         xs_buffer[g] = xs[g];
+//     }
+
+//     // 3) Tiled Compute：对每一行 tile (i0)，先清零再累加，最后写回
+//     tiled_compute:
+//     for (int i0 = 0; i0 < D; i0 += BI) {
+//         // BI 行 tile
+//         float acc_buffer[BI];
+//         #pragma HLS ARRAY_PARTITION variable = acc_buffer complete
+
+//         // （1）初始化这 BI 行的累加器
+//     init_acc:
+//         for (int bi = 0; bi < BI; bi++) {
+//             #pragma HLS UNROLL
+//             acc_buffer[bi] = 0.0f;
+//         }
+
+//         // （2）对每个输入 tile j0 累加
+//     block_i:
+//         for (int bi = 0; bi < BI; bi++) {
+//             #pragma HLS UNROLL
+//             int out_i = i0 + bi;
+//           block_j:
+//             for (int j0 = 0; j0 < N; j0 += BJ) {
+//                 // 对这个 tile 中每个 GS 段做点积
+//               dot_tile:
+//                 for (int bj = 0; bj < BJ; bj += GS) {
+//                     int32_t ival = 0;
+//                     int base = j0 + bj;
+//                   dot_k:
+//                     for (int k = 0; k < GS; k++) {
+//                         #pragma HLS UNROLL
+//                         ival += (int32_t)x_buffer[base + k]
+//                               * (int32_t)w_buffer_full[out_i][base + k];
+//                     }
+//                     float scale = ws_buffer_full[out_i][base/GS + bj/GS]
+//                                 * xs_buffer[(base)/GS];
+//                     acc_buffer[bi] += (float)ival * scale;
+//                 }
+//             }
+//         }
+
+//         // （3）全部累加结束后再写回
+//     write_back:
+//         for (int bi = 0; bi < BI; bi++) {
+//             #pragma HLS UNROLL
+//             xout[i0 + bi] = acc_buffer[bi];
+//         }
+//     }
+// }
+
+template <int N, int D>
+// 只做输入缓存、权重预载和内层展开，并验证结果正确性。
+void matmul_simple(
     float *xout,
     const int8_t *xq,
     const float *xs,
     const int8_t *wq,
-    const float *ws)
+    const float *ws) 
 {
-    // 1) 预加载所有权重和 scale 到 on-chip BRAM
-    static int8_t  w_buffer_full[D][N];
-    static float   ws_buffer_full[D][N/GS];
-    #pragma HLS ARRAY_PARTITION variable = w_buffer_full complete dim=2
-    #pragma HLS ARRAY_PARTITION variable = ws_buffer_full complete dim=2
+    // 1) 本地缓存
+    static int8_t  w_buf[D][N];
+    static float   ws_buf[D][N/GS];
+    static int8_t  x_buf[N];
+    static float   xs_buf[N/GS];
 
-    preload_weights:
+    // 2) 预加载权重和 scale —— 只执行一次（放在函数外也可）
+load_weights:
     for (int i = 0; i < D; i++) {
-        #pragma HLS PIPELINE II=1
-        memcpy(w_buffer_full[i], wq + i * N, N * sizeof(int8_t));
-        memcpy(ws_buffer_full[i], ws + (i * N / GS), (N/GS) * sizeof(float));
+      #pragma HLS PIPELINE II=1
+      for (int j = 0; j < N; j++) {
+        w_buf[i][j] = wq[i * N + j];
+      }
+      for (int g = 0; g < N/GS; g++) {
+        ws_buf[i][g] = ws[i * (N/GS) + g];
+      }
     }
 
-    // 2) 载入一次 x_buffer, xs_buffer
-    static int8_t  x_buffer[N];
-    static float   xs_buffer[N/GS];
-    #pragma HLS ARRAY_PARTITION variable = x_buffer cyclic factor=16
-    #pragma HLS ARRAY_PARTITION variable = xs_buffer cyclic factor=4
-
-    preload_input:
+    // 3) 缓存输入
+load_input:
     for (int j = 0; j < N; j++) {
-        #pragma HLS UNROLL factor=16
-        x_buffer[j] = xq[j];
+      #pragma HLS UNROLL factor=16
+      x_buf[j] = xq[j];
     }
-    preload_xs:
+load_xs:
     for (int g = 0; g < N/GS; g++) {
-        #pragma HLS UNROLL factor=4
-        xs_buffer[g] = xs[g];
+      #pragma HLS UNROLL factor=4
+      xs_buf[g] = xs[g];
     }
 
-    // 3) Tiled Compute：对每一行 tile (i0)，先清零再累加，最后写回
-    tiled_compute:
-    for (int i0 = 0; i0 < D; i0 += BI) {
-        // BI 行 tile
-        float acc_buffer[BI];
-        #pragma HLS ARRAY_PARTITION variable = acc_buffer complete
-
-        // （1）初始化这 BI 行的累加器
-    init_acc:
-        for (int bi = 0; bi < BI; bi++) {
+    // 4) 计算每一行
+compute:
+    for (int i = 0; i < D; i++) {
+      #pragma HLS PIPELINE II=1
+      float acc = 0.0f;
+      for (int g = 0; g < N/GS; g++) {
+          int base = g * GS;
+          int32_t sum = 0;
+        dot:
+          for (int k = 0; k < GS; k++) {
             #pragma HLS UNROLL
-            acc_buffer[bi] = 0.0f;
-        }
-
-        // （2）对每个输入 tile j0 累加
-    block_i:
-        for (int bi = 0; bi < BI; bi++) {
-            #pragma HLS UNROLL
-            int out_i = i0 + bi;
-          block_j:
-            for (int j0 = 0; j0 < N; j0 += BJ) {
-                // 对这个 tile 中每个 GS 段做点积
-              dot_tile:
-                for (int bj = 0; bj < BJ; bj += GS) {
-                    int32_t ival = 0;
-                    int base = j0 + bj;
-                  dot_k:
-                    for (int k = 0; k < GS; k++) {
-                        #pragma HLS UNROLL
-                        ival += (int32_t)x_buffer[base + k]
-                              * (int32_t)w_buffer_full[out_i][base + k];
-                    }
-                    float scale = ws_buffer_full[out_i][base/GS + bj/GS]
-                                * xs_buffer[(base)/GS];
-                    acc_buffer[bi] += (float)ival * scale;
-                }
-            }
-        }
-
-        // （3）全部累加结束后再写回
-    write_back:
-        for (int bi = 0; bi < BI; bi++) {
-            #pragma HLS UNROLL
-            xout[i0 + bi] = acc_buffer[bi];
-        }
+            sum += (int32_t)x_buf[base + k] * (int32_t)w_buf[i][base + k];
+          }
+          // 注意：这里的 scale 用 base/GS 直接索引
+          acc += (float)sum * ws_buf[i][g] * xs_buf[g];
+      }
+      xout[i] = acc;
     }
 }
-
 
 extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out)
 {
