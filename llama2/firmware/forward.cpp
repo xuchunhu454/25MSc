@@ -187,170 +187,170 @@ ws_buff:
   }
 }
 
-// template <int N, int D>
-// void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
-// {
-//   // W (d,n) @ x (n,) -> xout (d,)
-//   // by far the most amount of time is spent inside this little function
-//   // inputs to this function are both quantized
-
-//   // wq - quantized weight matrix
-//   // ws - scaling factor for each row of wq
-//   // xq - quantized input vector
-//   // xs - scaling factor for xq
-//   // xout - output vector
-
-//   static int8_t x_buffer[N];
-//   static float xs_buffer[N / GS];
-//   // float out_buffer[D];
-
-// #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
-// #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
-// //
-// x_buff:
-//   for (int i = 0; i < N; i++)
-//   {
-// #pragma HLS UNROLL factor = 16
-//     x_buffer[i] = xq[i];
-//   }
-// xs_buff:
-//   for (int j = 0; j <= N - GS; j += GS)
-//   {
-// #pragma HLS UNROLL factor = 4
-//     xs_buffer[j / GS] = xs[j / GS];
-//   }
-
-//   int i;
-//   for (i = 0; i < D; i++)
-//   {
-// #pragma HLS PIPELINE
-//     float val = 0.0f;
-//     int8_t w_buffer[N];
-//     float ws_buffer[N / GS];
-// #pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
-// #pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
-//     // start index of row i
-//     const int in = i * N;
-//   matmul1:
-//     for (int j = 0; j < N; j++)
-//     {
-//       // #pragma HLS UNROLL factor
-//       w_buffer[j] = wq[j + in];
-//     }
-//   matmul2:
-//     const int in_s = i * N / GS;
-//     const int groups = N / GS;
-//     for (int j = 0; j < groups; j++)
-//     {
-//       // #pragma HLS UNROLL factor
-//       ws_buffer[j] = ws[in_s + j];
-//     }
-
-//     // do the matmul in groups of GS
-//     int j;
-//   matmul3:
-//     for (j = 0; j <= N - GS; j += GS)
-//     {
-//       // #pragma HLS UNROLL
-//       int32_t ival = 0;
-//     matmul4:
-//       for (int k = 0; k < GS; k++)
-//       {
-//         // #pragma HLS UNROLL
-//         ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
-//       }
-//       val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
-//     }
-//     xout[i] = val;
-//   }
-// }
-template <int N, int D, int BI = 64, int BJ = 64>
-void matmul(
-    float *xout,
-    const int8_t *xq,
-    const float *xs,
-    const int8_t *wq,
-    const float *ws) 
+template <int N, int D>
+void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
-    // BI: tile size for output rows
-    // BJ: tile size for input cols (must be multiple of GS)
+  // W (d,n) @ x (n,) -> xout (d,)
+  // by far the most amount of time is spent inside this little function
+  // inputs to this function are both quantized
 
-    // 1) local full-weight buffers, on-chip BRAM
-    static int8_t  w_buffer_full[D][N];
-    static float   ws_buffer_full[D][N/GS];
-    #pragma HLS ARRAY_PARTITION variable = w_buffer_full complete dim=2
-    #pragma HLS ARRAY_PARTITION variable = ws_buffer_full complete dim=2
+  // wq - quantized weight matrix
+  // ws - scaling factor for each row of wq
+  // xq - quantized input vector
+  // xs - scaling factor for xq
+  // xout - output vector
 
-    // 2) local input buffer & scale (already small)
-    static int8_t  x_buffer[N];
-    static float   xs_buffer[N/GS];
-    #pragma HLS ARRAY_PARTITION variable = x_buffer cyclic factor=16
-    #pragma HLS ARRAY_PARTITION variable = xs_buffer cyclic factor=4
+  static int8_t x_buffer[N];
+  static float xs_buffer[N / GS];
+  // float out_buffer[D];
 
-    // 3) Stream directive to overlap stages
-    #pragma HLS DATAFLOW
+#pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
+#pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
+//
+x_buff:
+  for (int i = 0; i < N; i++)
+  {
+#pragma HLS UNROLL factor = 16
+    x_buffer[i] = xq[i];
+  }
+xs_buff:
+  for (int j = 0; j <= N - GS; j += GS)
+  {
+#pragma HLS UNROLL factor = 4
+    xs_buffer[j / GS] = xs[j / GS];
+  }
 
-    // --- Stage A: Preload full weights/scales into BRAM ---
-    preload_weights:
-    for (int i = 0; i < D; i++) {
-        #pragma HLS PIPELINE II=1
-        memcpy(w_buffer_full[i], wq + i * N, sizeof(int8_t) * N);
-        memcpy(ws_buffer_full[i], ws + (i * N / GS), sizeof(float) * (N/GS));
+  int i;
+  for (i = 0; i < D; i++)
+  {
+#pragma HLS PIPELINE
+    float val = 0.0f;
+    int8_t w_buffer[N];
+    float ws_buffer[N / GS];
+#pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
+#pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
+    // start index of row i
+    const int in = i * N;
+  matmul1:
+    for (int j = 0; j < N; j++)
+    {
+      // #pragma HLS UNROLL factor
+      w_buffer[j] = wq[j + in];
+    }
+  matmul2:
+    const int in_s = i * N / GS;
+    const int groups = N / GS;
+    for (int j = 0; j < groups; j++)
+    {
+      // #pragma HLS UNROLL factor
+      ws_buffer[j] = ws[in_s + j];
     }
 
-    // --- Stage B: Quantized input → local buffers ---
-    preload_input:
-    for (int j = 0; j < N; j++) {
-        #pragma HLS UNROLL factor=16
-        x_buffer[j] = xq[j];
+    // do the matmul in groups of GS
+    int j;
+  matmul3:
+    for (j = 0; j <= N - GS; j += GS)
+    {
+      // #pragma HLS UNROLL
+      int32_t ival = 0;
+    matmul4:
+      for (int k = 0; k < GS; k++)
+      {
+        // #pragma HLS UNROLL
+        ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
+      }
+      val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
     }
-    preload_xs:
-    for (int g = 0; g < N/GS; g++) {
-        #pragma HLS UNROLL factor=4
-        xs_buffer[g] = xs[g];
-    }
-
-    // --- Stage C: Tiled matrix multiply ---
-    tiled_compute:
-    for (int i0 = 0; i0 < D; i0 += BI) {
-        for (int j0 = 0; j0 < N; j0 += BJ) {
-            // local tile buffers
-            float acc_buffer[BI];
-            #pragma HLS ARRAY_PARTITION variable = acc_buffer complete
-
-        init_acc:
-            for (int bi = 0; bi < BI; bi++) {
-                #pragma HLS UNROLL
-                acc_buffer[bi] = 0.0f;
-            }
-
-        block_i:
-            for (int bi = 0; bi < BI; bi++) {
-                #pragma HLS PIPELINE II=1
-                int out_i = i0 + bi;
-
-            block_j:
-                for (int bj = 0; bj < BJ; bj += GS) {
-                    // compute one GS-length dot
-                    int in_j = j0 + bj;
-                    int32_t ival = 0;
-                dot_k:
-                    for (int k = 0; k < GS; k++) {
-                        #pragma HLS UNROLL
-                        ival += (int32_t)x_buffer[in_j + k] 
-                              * (int32_t)w_buffer_full[out_i][in_j + k];
-                    }
-                    float scale = ws_buffer_full[out_i][in_j/GS] 
-                                * xs_buffer[in_j/GS];
-                    acc_buffer[bi] += (float)ival * scale;
-                }
-
-            write_back:
-                xout[out_i] = acc_buffer[bi];
-            }
-        }
-    }
+    xout[i] = val;
+  }
 }
+// template <int N, int D, int BI = 64, int BJ = 64>
+// void matmul(
+//     float *xout,
+//     const int8_t *xq,
+//     const float *xs,
+//     const int8_t *wq,
+//     const float *ws) 
+// {
+//     // BI: tile size for output rows
+//     // BJ: tile size for input cols (must be multiple of GS)
+
+//     // 1) local full-weight buffers, on-chip BRAM
+//     static int8_t  w_buffer_full[D][N];
+//     static float   ws_buffer_full[D][N/GS];
+//     #pragma HLS ARRAY_PARTITION variable = w_buffer_full complete dim=2
+//     #pragma HLS ARRAY_PARTITION variable = ws_buffer_full complete dim=2
+
+//     // 2) local input buffer & scale (already small)
+//     static int8_t  x_buffer[N];
+//     static float   xs_buffer[N/GS];
+//     #pragma HLS ARRAY_PARTITION variable = x_buffer cyclic factor=16
+//     #pragma HLS ARRAY_PARTITION variable = xs_buffer cyclic factor=4
+
+//     // 3) Stream directive to overlap stages
+//     #pragma HLS DATAFLOW
+
+//     // --- Stage A: Preload full weights/scales into BRAM ---
+//     preload_weights:
+//     for (int i = 0; i < D; i++) {
+//         #pragma HLS PIPELINE II=1
+//         memcpy(w_buffer_full[i], wq + i * N, sizeof(int8_t) * N);
+//         memcpy(ws_buffer_full[i], ws + (i * N / GS), sizeof(float) * (N/GS));
+//     }
+
+//     // --- Stage B: Quantized input → local buffers ---
+//     preload_input:
+//     for (int j = 0; j < N; j++) {
+//         #pragma HLS UNROLL factor=16
+//         x_buffer[j] = xq[j];
+//     }
+//     preload_xs:
+//     for (int g = 0; g < N/GS; g++) {
+//         #pragma HLS UNROLL factor=4
+//         xs_buffer[g] = xs[g];
+//     }
+
+//     // --- Stage C: Tiled matrix multiply ---
+//     tiled_compute:
+//     for (int i0 = 0; i0 < D; i0 += BI) {
+//         for (int j0 = 0; j0 < N; j0 += BJ) {
+//             // local tile buffers
+//             float acc_buffer[BI];
+//             #pragma HLS ARRAY_PARTITION variable = acc_buffer complete
+
+//         init_acc:
+//             for (int bi = 0; bi < BI; bi++) {
+//                 #pragma HLS UNROLL
+//                 acc_buffer[bi] = 0.0f;
+//             }
+
+//         block_i:
+//             for (int bi = 0; bi < BI; bi++) {
+//                 #pragma HLS PIPELINE II=1
+//                 int out_i = i0 + bi;
+
+//             block_j:
+//                 for (int bj = 0; bj < BJ; bj += GS) {
+//                     // compute one GS-length dot
+//                     int in_j = j0 + bj;
+//                     int32_t ival = 0;
+//                 dot_k:
+//                     for (int k = 0; k < GS; k++) {
+//                         #pragma HLS UNROLL
+//                         ival += (int32_t)x_buffer[in_j + k] 
+//                               * (int32_t)w_buffer_full[out_i][in_j + k];
+//                     }
+//                     float scale = ws_buffer_full[out_i][in_j/GS] 
+//                                 * xs_buffer[in_j/GS];
+//                     acc_buffer[bi] += (float)ival * scale;
+//                 }
+
+//             write_back:
+//                 xout[out_i] = acc_buffer[bi];
+//             }
+//         }
+//     }
+// }
 
 extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out)
 {
