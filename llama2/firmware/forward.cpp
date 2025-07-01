@@ -273,71 +273,54 @@ void matmul(
   const int8_t* xq, const float* xs,
   const int8_t* wq, const float* ws
 ) {
-#pragma HLS DATAFLOW
-
-  // 局部缓冲区
+  const int groups = (N + GS - 1) / GS; // 安全分组数
+  constexpr int MAX_GROUPS = (N + GS - 1) / GS;
+  
+  // 输入缓冲区
   int8_t x_buffer[N];
-  float  xs_buffer[N / GS];
-#pragma HLS ARRAY_PARTITION variable=x_buffer complete dim=1
-#pragma HLS ARRAY_PARTITION variable=xs_buffer complete dim=1
+  float xs_buffer[MAX_GROUPS];
+  
+  // 权重缓冲区 (提升作用域)
+  static int8_t w_buffer[TILE_D][N];
+  static float ws_buffer[TILE_D][MAX_GROUPS];
 
-  // Step 1: 预加载输入向量和量化缩放因子
-load_xq:
-  for (int i = 0; i < N; i++) {
-#pragma HLS PIPELINE II=1
-    x_buffer[i] = xq[i];
+  // 加载输入向量
+  memcpy(x_buffer, xq, N * sizeof(int8_t));
+  for (int g = 0; g < groups; g++) {
+    xs_buffer[g] = xs[g];
   }
 
-load_xs:
-  for (int i = 0; i < N / GS; i++) {
-#pragma HLS PIPELINE II=1
-    xs_buffer[i] = xs[i];
-  }
-
-  // Step 2: 分 tile 处理输出维度
-tile_d_loop:
+  // 分块处理输出维度
   for (int tile = 0; tile < D; tile += TILE_D) {
-  tile_loop:
-    for (int i = 0; i < TILE_D; i++) {
-#pragma HLS PIPELINE II=1
-      float acc = 0.0f;
-
-      int8_t  w_buffer[N];
-      float   ws_buffer[N / GS];
-#pragma HLS ARRAY_PARTITION variable=w_buffer complete dim=1
-#pragma HLS ARRAY_PARTITION variable=ws_buffer complete dim=1
-
+    const int tilesize = (tile + TILE_D > D) ? D - tile : TILE_D;
+    
+    // 预加载权重块
+    for (int i = 0; i < tilesize; i++) {
       const int row = tile + i;
-      const int base_idx = row * N;
-      const int scale_idx = row * (N / GS);
-
-    // Step 2.1: 载入一行权重和对应的缩放因子
-    load_wq:
-      for (int j = 0; j < N; j++) {
-#pragma HLS UNROLL
-        w_buffer[j] = wq[base_idx + j];
+      memcpy(w_buffer[i], wq + row * N, N * sizeof(int8_t));
+      for (int g = 0; g < groups; g++) {
+        ws_buffer[i][g] = ws[row * groups + g];
       }
-
-    load_ws:
-      for (int j = 0; j < N / GS; j++) {
-#pragma HLS UNROLL
-        ws_buffer[j] = ws[scale_idx + j];
-      }
-
-    // Step 2.2: 点积分组计算
-    group_dot:
-      for (int j = 0; j < N; j += GS) {
-#pragma HLS UNROLL
+    }
+    
+    // 处理当前块
+    for (int i = 0; i < tilesize; i++) {
+      float acc = 0.0f;
+      
+      // 分组点积
+      for (int g = 0; g < groups; g++) {
+        const int start = g * GS;
+        const int end = (start + GS > N) ? N - start : GS;
+        
         int32_t partial_sum = 0;
-      dot_inner:
-        for (int k = 0; k < GS; k++) {
-#pragma HLS UNROLL
-          partial_sum += (int32_t)x_buffer[j + k] * (int32_t)w_buffer[j + k];
+        for (int j = 0; j < end; j++) {
+          const int idx = start + j;
+          partial_sum += (int32_t)x_buffer[idx] * (int32_t)w_buffer[i][idx];
         }
-        acc += ((float)partial_sum) * xs_buffer[j / GS] * ws_buffer[j / GS];
+        acc += (float)partial_sum * xs_buffer[g] * ws_buffer[i][g];
       }
-
-      xout[row] = acc;
+      
+      xout[tile + i] = acc;
     }
   }
 }
