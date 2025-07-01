@@ -275,50 +275,58 @@ void matmul_optimized(
     const int8_t* __restrict wq,
     const float* __restrict ws)
 {
-    // 安全检查
-    static_assert(N % GS == 0, "N must be divisible by GS");
-    assert(xq != nullptr && xs != nullptr);
-    assert(wq != nullptr && ws != nullptr);
-    assert(xout != nullptr);
-
+    // 创新点1: 分组并行计算架构
     constexpr int GROUPS = N / GS;
-    
-    // 阶段1: 加载输入向量 (分组处理避免大数组)
-    float xs_local[GROUPS];
-    #pragma HLS ARRAY_PARTITION variable=xs_local complete
-    
+    static_assert(N % GS == 0, "N must be divisible by GS");
+
+    // 创新点2: 输入向量静态展开
+    int8_t x_buffer[N];
+    float xs_buffer[GROUPS];
+    #pragma HLS ARRAY_PARTITION variable=x_buffer cyclic factor=32
+    #pragma HLS ARRAY_PARTITION variable=xs_buffer complete
+
+    // 阶段1: 并行加载输入
     load_input:
-    for (int g = 0; g < GROUPS; g++) {
+    for (int i = 0; i < N; i++) {
         #pragma HLS PIPELINE II=1
-        xs_local[g] = xs[g];
+        #pragma HLS UNROLL factor=32
+        x_buffer[i] = xq[i];
+        if (i % GS == 0) {
+            xs_buffer[i/GS] = xs[i/GS];
+        }
     }
 
-    // 阶段2: 分块处理输出
+    // 阶段2: 流水线化输出计算
     output_loop:
     for (int i = 0; i < D; i++) {
         #pragma HLS PIPELINE II=1
         
-        // 直接计算避免大缓存
-        float acc = 0;
+        // 创新点3: 权重行缓存优化
+        int8_t w_row[N];
+        #pragma HLS ARRAY_PARTITION variable=w_row cyclic factor=32
         
+        load_weight_row:
+        for (int j = 0; j < N; j++) {
+            #pragma HLS UNROLL factor=4
+            w_row[j] = wq[i * N + j];
+        }
+
+        // 创新点4: 分组点积并行化
+        float acc = 0;
         group_dot:
         for (int g = 0; g < GROUPS; g++) {
             #pragma HLS UNROLL factor=4
             
             int32_t sum = 0;
             #pragma HLS BIND_OP variable=sum op=add impl=fabric
-            
             dot_product:
             for (int j = 0; j < GS; j++) {
                 #pragma HLS UNROLL
-                const int idx = i * N + g * GS + j;
-                assert(idx < D * N);  // 权重访问检查
-                sum += xq[g * GS + j] * wq[idx];
+                sum += x_buffer[g*GS + j] * w_row[g*GS + j];
             }
             
-            const int scale_idx = i * GROUPS + g;
-            assert(scale_idx < D * GROUPS);  // 缩放因子检查
-            acc += xs_local[g] * ws[scale_idx] * (float)sum;
+            // 创新点5: 融合缩放计算
+            acc += xs_buffer[g] * ws[i * GROUPS + g] * (float)sum;
         }
         
         xout[i] = acc;
