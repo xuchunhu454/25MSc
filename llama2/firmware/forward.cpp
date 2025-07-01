@@ -413,9 +413,9 @@ main_forward_loop:
 
     // qkv matmuls for this position
     quantize(&xq, xb, GS);
-    matmul<dim, dim, GS>(q, xq.q, xq.s, (w->wq + l)->q, (w->wq + l)->s);
-    matmul<dim, kv_dim, GS>(k, xq.q, xq.s, (w->wk + l)->q, (w->wk + l)->s);
-    matmul<dim, kv_dim, GS>(v, xq.q, xq.s, (w->wv + l)->q, (w->wv + l)->s);
+    matmul<dim, dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
+    matmul<dim, kv_dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
+    matmul<dim, kv_dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
 
   // RoPE relative positional encoding: complex-valued rotate q and k in each head
   // Process the portion where both query and key vectors are involved (i < kv_dim)
@@ -530,7 +530,7 @@ main_forward_loop:
 
     // final matmul to get the output of the attention
     quantize(&xq, xb, GS);
-    matmul<dim, dim, GS>(xb2, xq.q, xq.s, (w->wo + l)->q, (w->wo + l)->s);
+    matmul<dim, dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
 
   // residual connection back into x
   residual:
@@ -546,8 +546,8 @@ main_forward_loop:
     // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
     // first calculate self.w1(x) and self.w3(x)
     quantize(&xq, xb, GS);
-    matmul<dim, hidden_dim, GS>(hb, xq.q, xq.s, (w->w1 + l)->q, (w->w1 + l)->s);
-    matmul<dim, hidden_dim, GS>(hb2, xq.q, xq.s, (w->w3 + l)->q, (w->w3 + l)->s);
+    matmul<dim, hidden_dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
+    matmul<dim, hidden_dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
     float hb_out[hidden_dim];
 #pragma HLS array_partition variable = hb_out type = cyclic factor = 16
   swi_glu:
@@ -566,7 +566,7 @@ main_forward_loop:
 
     // final matmul to get the output of the ffn
     quantize(&hq, hb, GS);
-    matmul<hidden_dim, dim, GS>(xb, hq.q, hq.s, (w->w2 + l)->q, (w->w2 + l)->s);
+    matmul<hidden_dim, dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
 
   // residual connection
   residual2:
@@ -582,5 +582,5 @@ main_forward_loop:
 
   // classifier into logits
   quantize(&xq, x, GS);
-  matmul<dim, vocab_size, GS>(out, xq.q, xq.s, w->wcls->q, w->wcls->s);
+  matmul<dim, vocab_size, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
 }
