@@ -3,6 +3,13 @@
 #include <cstring>
 
 #include <cmath>
+
+// 在文件顶端，全局缓存
+constexpr int MAX_N = 512;
+constexpr int MAX_D = 32000;
+static int8_t  w_all[D][N];
+static float   ws_all[D][N/GS];
+
 // neural net blocks; the dynamics of the Transformer
 template <int S>
 
