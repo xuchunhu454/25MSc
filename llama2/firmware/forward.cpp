@@ -4,11 +4,6 @@
 
 #include <cmath>
 
-// 在文件顶端，全局缓存
-constexpr int MAX_N = 512;
-constexpr int MAX_D = 32000;
-static int8_t  w_all [MAX_D][MAX_N];
-static float   ws_all[MAX_D][MAX_N/GS];
 
 // neural net blocks; the dynamics of the Transformer
 template <int S>
@@ -363,48 +358,50 @@ template <int N, int D>
 void matmul(float *xout,
             const int8_t *xq,
             const float  *xs,
-            const int8_t * /*wq_unused*/,
-            const float  * /*ws_unused*/) {
+            const int8_t *wq,
+            const float  *ws) 
+{
+    // ---- 1) 静态缓冲区，用 N,D 直接声明 ----
+    static int8_t  w_cache [D][N];
+    static float   ws_cache[D][N/GS];
+    static bool    loaded = false;
 
-  // 1) 本地缓存输入（xq, xs）
-  int8_t  xbuf[N];
-  float   xsb[N/GS];
-  #pragma HLS ARRAY_PARTITION variable=xbuf cyclic factor=16
-  #pragma HLS ARRAY_PARTITION variable=xsb  cyclic factor=4
-
-load_x:
-  for (int j = 0; j < N; j++) {
-    #pragma HLS UNROLL factor=16
-    xbuf[j] = xq[j];
-  }
-load_xs:
-  for (int g = 0; g < N/GS; g++) {
-    #pragma HLS UNROLL factor=4
-    xsb[g] = xs[g];
-  }
-
-  // 2) 逐行计算，使用全局 w_all/ws_all
-compute:
-  for (int i = 0; i < D; i++) {
-    #pragma HLS PIPELINE II=1
-    float acc = 0.0f;
-    const int8_t  *wrow = w_all[i];
-    const float   *wsrow = ws_all[i];
-
-  dot_group:
-    for (int g = 0; g < N/GS; g++) {
-      int32_t sum = 0;
-      int base = g * GS;
-    dot_k:
-      for (int k = 0; k < GS; k++) {
-        #pragma HLS UNROLL
-        sum += (int32_t)xbuf[base + k] * (int32_t)wrow[base + k];
-      }
-      acc += (float)sum * xsb[g] * wsrow[g];
+    // ---- 2) 只在第一次调用时预加载这一实例的 wq/ws ----
+    if (!loaded) {
+        for (int i = 0; i < D; i++) {
+            for (int j = 0; j < N; j++) {
+                w_cache[i][j]  = wq[i * N + j];
+            }
+        }
+        for (int i = 0; i < D; i++) {
+            for (int g = 0; g < N/GS; g++) {
+                ws_cache[i][g] = ws[i * (N/GS) + g];
+            }
+        }
+        loaded = true;
     }
-    xout[i] = acc;
-  }
+
+    // ---- 3) 缓存输入 ----
+    int8_t  xbuf[N];
+    float   xsb[N/GS];
+    for (int j = 0; j < N; j++)       xbuf[j] = xq[j];
+    for (int g = 0; g < N/GS; g++)    xsb[g]  = xs[g];
+
+    // ---- 4) 正常矩阵乘累加 ----
+    for (int i = 0; i < D; i++) {
+        float acc = 0.0f;
+        for (int g = 0; g < N/GS; g++) {
+            int base = g * GS;
+            int32_t sum = 0;
+            for (int k = 0; k < GS; k++) {
+                sum += (int32_t)xbuf[base + k] * (int32_t)w_cache[i][base + k];
+            }
+            acc += (float)sum * xsb[g] * ws_cache[i][g];
+        }
+        xout[i] = acc;
+    }
 }
+
 
 extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out)
 {
@@ -412,20 +409,20 @@ extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_hea
   // ----------------------------------------------------------
     // 预加载权重到 on-chip BRAM（只执行一次）
     // ----------------------------------------------------------
-    static bool weights_preloaded = false;
-    if (!weights_preloaded) {
-        preload_all_weights:
-        for (int i = 0; i < dim; i++) {
-            #pragma HLS PIPELINE II=1
-            memcpy(w_all[i],
-                   transformer->weights.wq[i].q,
-                   dim * sizeof(int8_t));
-            memcpy(ws_all[i],
-                   transformer->weights.wq[i].s,
-                   (dim/GS) * sizeof(float));
-        }
-        weights_preloaded = true;
-    }
+    // static bool weights_preloaded = false;
+    // if (!weights_preloaded) {
+    //     preload_all_weights:
+    //     for (int i = 0; i < dim; i++) {
+    //         #pragma HLS PIPELINE II=1
+    //         memcpy(w_all[i],
+    //                transformer->weights.wq[i].q,
+    //                dim * sizeof(int8_t));
+    //         memcpy(ws_all[i],
+    //                transformer->weights.wq[i].s,
+    //                (dim/GS) * sizeof(float));
+    //     }
+    //     weights_preloaded = true;
+    // }
 
 #pragma HLS INTERFACE m_axi port=transformer offset=slave bundle=gmem0
 #pragma HLS INTERFACE m_axi port=out offset=slave bundle=gmem1
