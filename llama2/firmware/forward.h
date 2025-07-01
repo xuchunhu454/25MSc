@@ -6,7 +6,7 @@
 #include <cstring>
 extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out);
 template <int N, int D, int GS=128>
-void matmul_optimized(
+void matmul(
     float* xout,
     const int8_t* __restrict xq,
     const float* __restrict xs,

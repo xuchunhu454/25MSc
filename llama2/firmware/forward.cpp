@@ -582,5 +582,5 @@ main_forward_loop:
 
   // classifier into logits
   quantize(&xq, x, GS);
-  matmul<dim, vocab_size, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
+  matmul<dim, vocab_size, GS>(out, xq.q, xq.s, w->wcls->q, w->wcls->s);
 }
