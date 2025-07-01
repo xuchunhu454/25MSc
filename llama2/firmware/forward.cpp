@@ -353,7 +353,6 @@ ws_buff:
 //     }
 // }
 
-// 优化后的 template matmul
 template <int N, int D>
 void matmul(float *xout,
             const int8_t *xq,
@@ -361,46 +360,69 @@ void matmul(float *xout,
             const int8_t *wq,
             const float  *ws) 
 {
-    // ---- 1) 静态缓冲区，用 N,D 直接声明 ----
-    static int8_t  w_cache [D][N];
-    static float   ws_cache[D][N/GS];
-    static bool    loaded = false;
+    // ------------------------------------------------------------------------
+    // 1) 声明本地缓存：一次性装载所有权重和 scale
+    // ------------------------------------------------------------------------
+    int8_t  w_cache [D][N];
+    float   ws_cache[D][N/GS];
+    #pragma HLS ARRAY_PARTITION variable=w_cache  cyclic factor=32 dim=2
+    #pragma HLS ARRAY_PARTITION variable=ws_cache cyclic factor=32 dim=2
 
-    // ---- 2) 只在第一次调用时预加载这一实例的 wq/ws ----
-    if (!loaded) {
-        for (int i = 0; i < D; i++) {
-            for (int j = 0; j < N; j++) {
-                w_cache[i][j]  = wq[i * N + j];
-            }
+load_weights:
+    for (int i = 0; i < D; i++) {
+        #pragma HLS PIPELINE II=1
+        // 拷贝一行 int8 权重
+        for (int j = 0; j < N; j++) {
+            w_cache[i][j] = wq[i * N + j];
         }
-        for (int i = 0; i < D; i++) {
-            for (int g = 0; g < N/GS; g++) {
-                ws_cache[i][g] = ws[i * (N/GS) + g];
-            }
+        // 拷贝这一行对应的 scale（group-wise）
+        for (int g = 0; g < N/GS; g++) {
+            ws_cache[i][g] = ws[i * (N/GS) + g];
         }
-        loaded = true;
     }
 
-    // ---- 3) 缓存输入 ----
+    // ------------------------------------------------------------------------
+    // 2) 缓存输入向量和它的 scale
+    // ------------------------------------------------------------------------
     int8_t  xbuf[N];
-    float   xsb[N/GS];
-    for (int j = 0; j < N; j++)       xbuf[j] = xq[j];
-    for (int g = 0; g < N/GS; g++)    xsb[g]  = xs[g];
+    float   xsb [N/GS];
+    #pragma HLS ARRAY_PARTITION variable=xbuf cyclic factor=16
+    #pragma HLS ARRAY_PARTITION variable=xsb  cyclic factor=4
 
-    // ---- 4) 正常矩阵乘累加 ----
+load_input:
+    for (int j = 0; j < N; j++) {
+        #pragma HLS UNROLL factor=16
+        xbuf[j] = xq[j];
+    }
+load_xs:
+    for (int g = 0; g < N/GS; g++) {
+        #pragma HLS UNROLL factor=4
+        xsb[g] = xs[g];
+    }
+
+    // ------------------------------------------------------------------------
+    // 3) 逐行做 matmul，II=1 的流水线
+    // ------------------------------------------------------------------------
+compute:
     for (int i = 0; i < D; i++) {
+        #pragma HLS PIPELINE II=1
         float acc = 0.0f;
+
+    dot_groups:
         for (int g = 0; g < N/GS; g++) {
-            int base = g * GS;
             int32_t sum = 0;
+            int base = g * GS;
+        dot_elems:
             for (int k = 0; k < GS; k++) {
-                sum += (int32_t)xbuf[base + k] * (int32_t)w_cache[i][base + k];
+                #pragma HLS UNROLL
+                sum += int32_t(xbuf[base + k]) * int32_t(w_cache[i][base + k]);
             }
-            acc += (float)sum * xsb[g] * ws_cache[i][g];
+            acc += float(sum) * xsb[g] * ws_cache[i][g];
         }
         xout[i] = acc;
     }
 }
+
 
 
 extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out)
