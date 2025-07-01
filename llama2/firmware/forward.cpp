@@ -267,161 +267,81 @@ ws_buff:
 //   }
 // }
 
-// template <int N, int D, int BI = 64, int BJ = 64>
-// void matmul_optimized(
-//     float *xout,
-//     const int8_t *xq,
-//     const float *xs,
-//     const int8_t *wq,
-//     const float *ws)
-// {
-//     // 1) 预加载所有权重和 scale 到 on-chip BRAM
-//     static int8_t  w_buffer_full[D][N];
-//     static float   ws_buffer_full[D][N/GS];
-//     #pragma HLS ARRAY_PARTITION variable = w_buffer_full complete dim=2
-//     #pragma HLS ARRAY_PARTITION variable = ws_buffer_full complete dim=2
+template<int N, int D, int TILE_D, int GS>
+void matmul(
+  float* xout,
+  const int8_t* xq, const float* xs,
+  const int8_t* wq, const float* ws
+) {
+#pragma HLS DATAFLOW
 
-//     preload_weights:
-//     for (int i = 0; i < D; i++) {
-//         #pragma HLS PIPELINE II=1
-//         memcpy(w_buffer_full[i], wq + i * N, N * sizeof(int8_t));
-//         memcpy(ws_buffer_full[i], ws + (i * N / GS), (N/GS) * sizeof(float));
-//     }
+  // 局部缓冲区
+  int8_t x_buffer[N];
+  float  xs_buffer[N / GS];
+#pragma HLS ARRAY_PARTITION variable=x_buffer complete dim=1
+#pragma HLS ARRAY_PARTITION variable=xs_buffer complete dim=1
 
-//     // 2) 载入一次 x_buffer, xs_buffer
-//     static int8_t  x_buffer[N];
-//     static float   xs_buffer[N/GS];
-//     #pragma HLS ARRAY_PARTITION variable = x_buffer cyclic factor=16
-//     #pragma HLS ARRAY_PARTITION variable = xs_buffer cyclic factor=4
+  // Step 1: 预加载输入向量和量化缩放因子
+load_xq:
+  for (int i = 0; i < N; i++) {
+#pragma HLS PIPELINE II=1
+    x_buffer[i] = xq[i];
+  }
 
-//     preload_input:
-//     for (int j = 0; j < N; j++) {
-//         #pragma HLS UNROLL factor=16
-//         x_buffer[j] = xq[j];
-//     }
-//     preload_xs:
-//     for (int g = 0; g < N/GS; g++) {
-//         #pragma HLS UNROLL factor=4
-//         xs_buffer[g] = xs[g];
-//     }
-
-//     // 3) Tiled Compute：对每一行 tile (i0)，先清零再累加，最后写回
-//     tiled_compute:
-//     for (int i0 = 0; i0 < D; i0 += BI) {
-//         // BI 行 tile
-//         float acc_buffer[BI];
-//         #pragma HLS ARRAY_PARTITION variable = acc_buffer complete
-
-//         // （1）初始化这 BI 行的累加器
-//     init_acc:
-//         for (int bi = 0; bi < BI; bi++) {
-//             #pragma HLS UNROLL
-//             acc_buffer[bi] = 0.0f;
-//         }
-
-//         // （2）对每个输入 tile j0 累加
-//     block_i:
-//         for (int bi = 0; bi < BI; bi++) {
-//             #pragma HLS UNROLL
-//             int out_i = i0 + bi;
-//           block_j:
-//             for (int j0 = 0; j0 < N; j0 += BJ) {
-//                 // 对这个 tile 中每个 GS 段做点积
-//               dot_tile:
-//                 for (int bj = 0; bj < BJ; bj += GS) {
-//                     int32_t ival = 0;
-//                     int base = j0 + bj;
-//                   dot_k:
-//                     for (int k = 0; k < GS; k++) {
-//                         #pragma HLS UNROLL
-//                         ival += (int32_t)x_buffer[base + k]
-//                               * (int32_t)w_buffer_full[out_i][base + k];
-//                     }
-//                     float scale = ws_buffer_full[out_i][base/GS + bj/GS]
-//                                 * xs_buffer[(base)/GS];
-//                     acc_buffer[bi] += (float)ival * scale;
-//                 }
-//             }
-//         }
-
-//         // （3）全部累加结束后再写回
-//     write_back:
-//         for (int bi = 0; bi < BI; bi++) {
-//             #pragma HLS UNROLL
-//             xout[i0 + bi] = acc_buffer[bi];
-//         }
-//     }
-// }
-
-template <int N, int D>
-void matmul(float *xout,
-            const int8_t *xq,
-            const float  *xs,
-            const int8_t *wq,
-            const float  *ws) 
-{
-    // ------------------------------------------------------------------------
-    // 1) 声明本地缓存：一次性装载所有权重和 scale
-    // ------------------------------------------------------------------------
-    int8_t  w_cache [D][N];
-    float   ws_cache[D][N/GS];
-    #pragma HLS ARRAY_PARTITION variable=w_cache  cyclic factor=32 dim=2
-    #pragma HLS ARRAY_PARTITION variable=ws_cache cyclic factor=32 dim=2
-
-load_weights:
-    for (int i = 0; i < D; i++) {
-        #pragma HLS PIPELINE II=1
-        // 拷贝一行 int8 权重
-        for (int j = 0; j < N; j++) {
-            w_cache[i][j] = wq[i * N + j];
-        }
-        // 拷贝这一行对应的 scale（group-wise）
-        for (int g = 0; g < N/GS; g++) {
-            ws_cache[i][g] = ws[i * (N/GS) + g];
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // 2) 缓存输入向量和它的 scale
-    // ------------------------------------------------------------------------
-    int8_t  xbuf[N];
-    float   xsb [N/GS];
-    #pragma HLS ARRAY_PARTITION variable=xbuf cyclic factor=16
-    #pragma HLS ARRAY_PARTITION variable=xsb  cyclic factor=4
-
-load_input:
-    for (int j = 0; j < N; j++) {
-        #pragma HLS UNROLL factor=16
-        xbuf[j] = xq[j];
-    }
 load_xs:
-    for (int g = 0; g < N/GS; g++) {
-        #pragma HLS UNROLL factor=4
-        xsb[g] = xs[g];
-    }
+  for (int i = 0; i < N / GS; i++) {
+#pragma HLS PIPELINE II=1
+    xs_buffer[i] = xs[i];
+  }
 
-    // ------------------------------------------------------------------------
-    // 3) 逐行做 matmul，II=1 的流水线
-    // ------------------------------------------------------------------------
-compute:
-    for (int i = 0; i < D; i++) {
-        #pragma HLS PIPELINE II=1
-        float acc = 0.0f;
+  // Step 2: 分 tile 处理输出维度
+tile_d_loop:
+  for (int tile = 0; tile < D; tile += TILE_D) {
+  tile_loop:
+    for (int i = 0; i < TILE_D; i++) {
+#pragma HLS PIPELINE II=1
+      float acc = 0.0f;
 
-    dot_groups:
-        for (int g = 0; g < N/GS; g++) {
-            int32_t sum = 0;
-            int base = g * GS;
-        dot_elems:
-            for (int k = 0; k < GS; k++) {
-                #pragma HLS UNROLL
-                sum += int32_t(xbuf[base + k]) * int32_t(w_cache[i][base + k]);
-            }
-            acc += float(sum) * xsb[g] * ws_cache[i][g];
+      int8_t  w_buffer[N];
+      float   ws_buffer[N / GS];
+#pragma HLS ARRAY_PARTITION variable=w_buffer complete dim=1
+#pragma HLS ARRAY_PARTITION variable=ws_buffer complete dim=1
+
+      const int row = tile + i;
+      const int base_idx = row * N;
+      const int scale_idx = row * (N / GS);
+
+    // Step 2.1: 载入一行权重和对应的缩放因子
+    load_wq:
+      for (int j = 0; j < N; j++) {
+#pragma HLS UNROLL
+        w_buffer[j] = wq[base_idx + j];
+      }
+
+    load_ws:
+      for (int j = 0; j < N / GS; j++) {
+#pragma HLS UNROLL
+        ws_buffer[j] = ws[scale_idx + j];
+      }
+
+    // Step 2.2: 点积分组计算
+    group_dot:
+      for (int j = 0; j < N; j += GS) {
+#pragma HLS UNROLL
+        int32_t partial_sum = 0;
+      dot_inner:
+        for (int k = 0; k < GS; k++) {
+#pragma HLS UNROLL
+          partial_sum += (int32_t)x_buffer[j + k] * (int32_t)w_buffer[j + k];
         }
-        xout[i] = acc;
+        acc += ((float)partial_sum) * xs_buffer[j / GS] * ws_buffer[j / GS];
+      }
+
+      xout[row] = acc;
     }
+  }
 }
+
 
 
 
@@ -502,9 +422,9 @@ main_forward_loop:
 
     // qkv matmuls for this position
     quantize(&xq, xb, GS);
-    matmul<dim, dim>(q, xq.q, xq.s, (w->wq + l)->q, (w->wq + l)->s);
-    matmul<dim, kv_dim>(k, xq.q, xq.s, (w->wk + l)->q, (w->wk + l)->s);
-    matmul<dim, kv_dim>(v, xq.q, xq.s, (w->wv + l)->q, (w->wv + l)->s);
+    matmul<dim, dim, tile_d, GS>(q, xq.q, xq.s, (w->wq + l)->q, (w->wq + l)->s);
+    matmul<dim, kv_dim, tile_d, GS>(k, xq.q, xq.s, (w->wk + l)->q, (w->wk + l)->s);
+    matmul<dim, kv_dim, tile_d, GS>(v, xq.q, xq.s, (w->wv + l)->q, (w->wv + l)->s);
 
   // RoPE relative positional encoding: complex-valued rotate q and k in each head
   // Process the portion where both query and key vectors are involved (i < kv_dim)
@@ -619,7 +539,7 @@ main_forward_loop:
 
     // final matmul to get the output of the attention
     quantize(&xq, xb, GS);
-    matmul<dim, dim>(xb2, xq.q, xq.s, (w->wo + l)->q, (w->wo + l)->s);
+    matmul<dim, dim, tile_d, GS>(xb2, xq.q, xq.s, (w->wo + l)->q, (w->wo + l)->s);
 
   // residual connection back into x
   residual:
@@ -635,8 +555,8 @@ main_forward_loop:
     // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
     // first calculate self.w1(x) and self.w3(x)
     quantize(&xq, xb, GS);
-    matmul<dim, hidden_dim>(hb, xq.q, xq.s, (w->w1 + l)->q, (w->w1 + l)->s);
-    matmul<dim, hidden_dim>(hb2, xq.q, xq.s, (w->w3 + l)->q, (w->w3 + l)->s);
+    matmul<dim, hidden_dim, tile_d, GS>(hb, xq.q, xq.s, (w->w1 + l)->q, (w->w1 + l)->s);
+    matmul<dim, hidden_dim, tile_d, GS>(hb2, xq.q, xq.s, (w->w3 + l)->q, (w->w3 + l)->s);
     float hb_out[hidden_dim];
 #pragma HLS array_partition variable = hb_out type = cyclic factor = 16
   swi_glu:
@@ -655,7 +575,7 @@ main_forward_loop:
 
     // final matmul to get the output of the ffn
     quantize(&hq, hb, GS);
-    matmul<hidden_dim, dim>(xb, hq.q, hq.s, (w->w2 + l)->q, (w->w2 + l)->s);
+    matmul<hidden_dim, dim, tile_d, GS>(xb, hq.q, hq.s, (w->w2 + l)->q, (w->w2 + l)->s);
 
   // residual connection
   residual2:
@@ -671,5 +591,5 @@ main_forward_loop:
 
   // classifier into logits
   quantize(&xq, x, GS);
-  matmul<dim, vocab_size>(out, xq.q, xq.s, w->wcls->q, w->wcls->s);
+  matmul<dim, vocab_size, tile_d, GS>(out, xq.q, xq.s, w->wcls->q, w->wcls->s);
 }

@@ -9,6 +9,7 @@ static constexpr int n_kv_heads = 12;
 static constexpr int vocab_size = 32000;
 static constexpr int seq_len = 1024;
 static constexpr int GS = 64;
+static constexpr int tile_d = 32; // 每次 tile 的 D 大小
 
 constexpr Config config = {
     .dim = dim,
@@ -19,4 +20,5 @@ constexpr Config config = {
     .vocab_size = vocab_size,
     .seq_len = seq_len,
     .GS = GS,
+    .tile_d = tile_d,
 };
