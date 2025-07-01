@@ -351,67 +351,75 @@ ws_buff:
 //     }
 // }
 
+// 优化后的 template matmul
 template <int N, int D>
-// 只做输入缓存、权重预载和内层展开，并验证结果正确性。
-void matmul_simple(
-    float *xout,
-    const int8_t *xq,
-    const float *xs,
-    const int8_t *wq,
-    const float *ws) 
-{
-    // 1) 本地缓存
-    static int8_t  w_buf[D][N];
-    static float   ws_buf[D][N/GS];
-    static int8_t  x_buf[N];
-    static float   xs_buf[N/GS];
+void matmul(float *xout,
+            const int8_t *xq,
+            const float  *xs,
+            const int8_t * /*wq_unused*/,
+            const float  * /*ws_unused*/) {
 
-    // 2) 预加载权重和 scale —— 只执行一次（放在函数外也可）
-load_weights:
-    for (int i = 0; i < D; i++) {
-      #pragma HLS PIPELINE II=1
-      for (int j = 0; j < N; j++) {
-        w_buf[i][j] = wq[i * N + j];
-      }
-      for (int g = 0; g < N/GS; g++) {
-        ws_buf[i][g] = ws[i * (N/GS) + g];
-      }
-    }
+  // 1) 本地缓存输入（xq, xs）
+  int8_t  xbuf[N];
+  float   xsb[N/GS];
+  #pragma HLS ARRAY_PARTITION variable=xbuf cyclic factor=16
+  #pragma HLS ARRAY_PARTITION variable=xsb  cyclic factor=4
 
-    // 3) 缓存输入
-load_input:
-    for (int j = 0; j < N; j++) {
-      #pragma HLS UNROLL factor=16
-      x_buf[j] = xq[j];
-    }
+load_x:
+  for (int j = 0; j < N; j++) {
+    #pragma HLS UNROLL factor=16
+    xbuf[j] = xq[j];
+  }
 load_xs:
-    for (int g = 0; g < N/GS; g++) {
-      #pragma HLS UNROLL factor=4
-      xs_buf[g] = xs[g];
-    }
+  for (int g = 0; g < N/GS; g++) {
+    #pragma HLS UNROLL factor=4
+    xsb[g] = xs[g];
+  }
 
-    // 4) 计算每一行
+  // 2) 逐行计算，使用全局 w_all/ws_all
 compute:
-    for (int i = 0; i < D; i++) {
-      #pragma HLS PIPELINE II=1
-      float acc = 0.0f;
-      for (int g = 0; g < N/GS; g++) {
-          int base = g * GS;
-          int32_t sum = 0;
-        dot:
-          for (int k = 0; k < GS; k++) {
-            #pragma HLS UNROLL
-            sum += (int32_t)x_buf[base + k] * (int32_t)w_buf[i][base + k];
-          }
-          // 注意：这里的 scale 用 base/GS 直接索引
-          acc += (float)sum * ws_buf[i][g] * xs_buf[g];
+  for (int i = 0; i < D; i++) {
+    #pragma HLS PIPELINE II=1
+    float acc = 0.0f;
+    const int8_t  *wrow = w_all[i];
+    const float   *wsrow = ws_all[i];
+
+  dot_group:
+    for (int g = 0; g < N/GS; g++) {
+      int32_t sum = 0;
+      int base = g * GS;
+    dot_k:
+      for (int k = 0; k < GS; k++) {
+        #pragma HLS UNROLL
+        sum += (int32_t)xbuf[base + k] * (int32_t)wrow[base + k];
       }
-      xout[i] = acc;
+      acc += (float)sum * xsb[g] * wsrow[g];
     }
+    xout[i] = acc;
+  }
 }
 
 extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out)
 {
+
+  // ----------------------------------------------------------
+    // 预加载权重到 on-chip BRAM（只执行一次）
+    // ----------------------------------------------------------
+    static bool weights_preloaded = false;
+    if (!weights_preloaded) {
+        preload_all_weights:
+        for (int i = 0; i < dim; i++) {
+            #pragma HLS PIPELINE II=1
+            memcpy(w_all[i],
+                   transformer->weights.wq[i].q,
+                   dim * sizeof(int8_t));
+            memcpy(ws_all[i],
+                   transformer->weights.wq[i].s,
+                   (dim/GS) * sizeof(float));
+        }
+        weights_preloaded = true;
+    }
+
 #pragma HLS INTERFACE m_axi port=transformer offset=slave bundle=gmem0
 #pragma HLS INTERFACE m_axi port=out offset=slave bundle=gmem1
 #pragma HLS INTERFACE m_axi port=key_cache offset=slave bundle=gmem2
