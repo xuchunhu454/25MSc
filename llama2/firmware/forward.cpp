@@ -268,7 +268,7 @@ ws_buff:
 // }
 
 template <int N, int D, int GS=128>
-void matmul_optimized(
+void matmul(
     float* xout,
     const int8_t* __restrict xq,
     const float* __restrict xs,

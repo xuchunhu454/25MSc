@@ -12,64 +12,6 @@ void matmul(
     const float* __restrict xs,
     const int8_t* __restrict wq,
     const float* __restrict ws)
-{
-    // 创新点1: 分组并行计算架构
-    constexpr int GROUPS = N / GS;
-    static_assert(N % GS == 0, "N must be divisible by GS");
-
-    // 创新点2: 输入向量静态展开
-    int8_t x_buffer[N];
-    float xs_buffer[GROUPS];
-    #pragma HLS ARRAY_PARTITION variable=x_buffer cyclic factor=32
-    #pragma HLS ARRAY_PARTITION variable=xs_buffer complete
-
-    // 阶段1: 并行加载输入
-    load_input:
-    for (int i = 0; i < N; i++) {
-        #pragma HLS PIPELINE II=1
-        #pragma HLS UNROLL factor=32
-        x_buffer[i] = xq[i];
-        if (i % GS == 0) {
-            xs_buffer[i/GS] = xs[i/GS];
-        }
-    }
-
-    // 阶段2: 流水线化输出计算
-    output_loop:
-    for (int i = 0; i < D; i++) {
-        #pragma HLS PIPELINE II=1
-        
-        // 创新点3: 权重行缓存优化
-        int8_t w_row[N];
-        #pragma HLS ARRAY_PARTITION variable=w_row cyclic factor=32
-        
-        load_weight_row:
-        for (int j = 0; j < N; j++) {
-            #pragma HLS UNROLL factor=4
-            w_row[j] = wq[i * N + j];
-        }
-
-        // 创新点4: 分组点积并行化
-        float acc = 0;
-        group_dot:
-        for (int g = 0; g < GROUPS; g++) {
-            #pragma HLS UNROLL factor=4
-            
-            int32_t sum = 0;
-            #pragma HLS BIND_OP variable=sum op=add impl=fabric
-            dot_product:
-            for (int j = 0; j < GS; j++) {
-                #pragma HLS UNROLL
-                sum += x_buffer[g*GS + j] * w_row[g*GS + j];
-            }
-            
-            // 创新点5: 融合缩放计算
-            acc += xs_buffer[g] * ws[i * GROUPS + g] * (float)sum;
-        }
-        
-        xout[i] = acc;
-    }
-}
 
 template <int S>
 void dequantize(QuantizedTensor<S> *qx, float x[S], int GS)
