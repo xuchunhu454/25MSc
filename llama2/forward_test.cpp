@@ -5,19 +5,18 @@
 #include <string>
 #include <cstdint>
 
-#include "../firmware/config.h"
-#include "../firmware/typedefs.h"
-#include "../firmware/forward.h"              
-#include "tokenizer.h"            
-#include "sampling.h"             
-#include "transformer_loader.h"   
+#include "firmware/config.h"
+#include "firmware/typedefs.h"
+#include "firmware/forward.h"              
+#include "firmware/tokenizer.h"            
+#include "firmware/sampling.h"             
+#include "firmware/transformer_loader.h"   
 
 int main() {
     // Model and tokenizer files
     std::string checkpoint_path = "modelq.bin";
     std::string tokenizer_path  = "tokenizer.bin";
     char *prompt                = "Long time ago, ";
-    //char *prompt                = NULL;
     int   steps                 = 64;
 
     // 1) load model
