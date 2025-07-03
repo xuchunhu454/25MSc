@@ -1,17 +1,12 @@
 #ifndef FIRMWARE_FORWARD_H
 #define FIRMWARE_FORWARD_H
+
 #include "typedefs.h"
 #include "config.h"
 #include <math.h>
 #include <cstring>
+
 extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out);
-template <int N, int D, int GS=128>
-void matmul(
-    float* xout,
-    const int8_t* __restrict xq,
-    const float* __restrict xs,
-    const int8_t* __restrict wq,
-    const float* __restrict ws)
 
 template <int S>
 void dequantize(QuantizedTensor<S> *qx, float x[S], int GS)
@@ -29,27 +24,23 @@ void quantize(QuantizedTensor<S> *qx, float x[S], int GS)
   constexpr float Q_MAX = 127.0f;
   float scale_buffer[num_groups];
   int8_t quantized_buffer[S];
-//#pragma HLS ARRAY_PARTITION variable = x type=cyclic factor = 8
-#pragma HLS ARRAY_PARTITION variable = quantized_buffer type=cyclic factor=64
-#pragma HLS ARRAY_PARTITION variable = scale_buffer type=cyclic factor = 16
+  //#pragma HLS ARRAY_PARTITION variable = x type=cyclic factor = 8
+  #pragma HLS ARRAY_PARTITION variable = quantized_buffer type=cyclic factor=64
+  #pragma HLS ARRAY_PARTITION variable = scale_buffer type=cyclic factor = 16
 
-
-main_loop:
-  for (int group = 0; group < num_groups; group++)
-  {
-#pragma HLS UNROLL factor = 8
-#pragma HLS PIPELINE
+  main_loop:
+  for (int group = 0; group < num_groups; group++) {
+    #pragma HLS UNROLL factor = 8
+    #pragma HLS PIPELINE
     float wmax = 0.0;
     int base_idx = group * GS;
 
     // Calculate the max absolute value in the current group
     max:
-    for (int i = 0; i < GS; i++)
-    {
-#pragma HLS PIPELINE
+    for (int i = 0; i < GS; i++) {
+      #pragma HLS PIPELINE
       float val = fabs(x[base_idx + i]);
-      if (val > wmax)
-      {
+      if (val > wmax) {
         wmax = val;
       }
     }
@@ -59,10 +50,9 @@ main_loop:
     scale_buffer[group] = scale;
 
     // Calculate and write the quantized values
-    for (int i = 0; i < GS; i++)
-    {
-//#pragma HLS UNROLL factor=8 skip_exit_check
-#pragma HLS PIPELINE
+    for (int i = 0; i < GS; i++) {
+      //#pragma HLS UNROLL factor=8 skip_exit_check
+      #pragma HLS PIPELINE
       float quant_value = x[base_idx + i] / scale;   // scale
       int8_t quantized = (int8_t)round(quant_value); // round and clamp
       quantized_buffer[base_idx + i] = quantized;

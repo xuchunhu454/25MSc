@@ -3,13 +3,10 @@
 #include <cstring>
 
 #include <cmath>
-
-
 // neural net blocks; the dynamics of the Transformer
 template <int S>
 
 // o = output, x = input, weight = array of gain params
-
 
 void rmsnorm(float o[S], float x[S], float weight[S])
 {
@@ -19,17 +16,17 @@ void rmsnorm(float o[S], float x[S], float weight[S])
   float x_buff[S];
   float weight_buff[S];
   float out_buff[S];
-#pragma HLS array_partition variable = x_buff type = cyclic factor = 128
-#pragma HLS array_partition variable = weight_buff type = cyclic factor = 64
-#pragma HLS array_partition variable = out_buff type = cyclic factor = 64
+  #pragma HLS array_partition variable = x_buff type = cyclic factor = 128
+  #pragma HLS array_partition variable = weight_buff type = cyclic factor = 64
+  #pragma HLS array_partition variable = out_buff type = cyclic factor = 64
   std::memcpy(x_buff, x, array_size);
   std::memcpy(weight_buff, weight, array_size);
 
-sum_of_squares:
+  sum_of_squares:
   for (int j = 0; j < S; j++)
   {
-#pragma HLS PIPELINE
-#pragma HLS UNROLL factor = 128 skip_exit_check
+    #pragma HLS PIPELINE
+    #pragma HLS UNROLL factor = 128 skip_exit_check
     float x_j = x_buff[j];
     ss += x_j * x_j;
   }
@@ -37,11 +34,11 @@ sum_of_squares:
   ss += 1e-5f;
   ss = 1.0f / sqrtf(ss);
 // normalize and scale
-norm_and_scale:
+  norm_and_scale:
   for (int j = 0; j < S; j++)
   {
-#pragma HLS PIPELINE
-#pragma HLS UNROLL factor = 64
+    #pragma HLS PIPELINE
+    #pragma HLS UNROLL factor = 64
     float weight_j = weight_buff[j];
     float x_j = x_buff[j];
     out_buff[j] = weight_j * (ss * x_j);
@@ -55,11 +52,11 @@ void softmax(float *x, int size)
   // find max value (for numerical stability)
   float buffer[MAXSIZE];
   float max_val = x[0];
-max:
+  max:
   for (int i = 1; i < size; i++)
   {
-#pragma HLS loop_tripcount min = 0 max = 257 avg = 129
-#pragma HLS PIPELINE
+    #pragma HLS loop_tripcount min = 0 max = 257 avg = 129
+    #pragma HLS PIPELINE
     float x_i = x[i];
     if (x_i > max_val)
     {
@@ -68,30 +65,30 @@ max:
   }
   // exp and sum
 
-exp:
+  exp:
   for (int i = 0; i < size; i++)
   {
-#pragma HLS loop_tripcount min = 0 max = 257 avg = 129
-#pragma HLS PIPELINE
-#pragma HLS UNROLL factor = 16
+    #pragma HLS loop_tripcount min = 0 max = 257 avg = 129
+    #pragma HLS PIPELINE
+    #pragma HLS UNROLL factor = 16
     float x_i = expf(x[i] - max_val);
     buffer[i] = x_i;
   }
   float sum = 0.0f;
-sum:
+  sum:
   for (int i = 0; i < size; i++)
   {
-#pragma HLS loop_tripcount min = 0 max = 257 avg = 129
+    #pragma HLS loop_tripcount min = 0 max = 257 avg = 129
     sum += buffer[i];
   }
   // normalize
   const float inv_sum = 1.0 / sum;
-norm:
+  norm:
   for (int i = 0; i < size; i++)
   {
-#pragma HLS loop_tripcount min = 0 max = 257 avg = 129
-#pragma HLS PIPELINE
-#pragma HLS UNROLL factor = 16
+    #pragma HLS loop_tripcount min = 0 max = 257 avg = 129
+    #pragma HLS PIPELINE
+    #pragma HLS UNROLL factor = 16
     x[i] = buffer[i] * inv_sum;
   }
 }
@@ -115,42 +112,37 @@ void matmul_old(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
   int8_t w_buffer[N * D];
   float ws_buffer[N * D / GS];
 
-#pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
-#pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
-#pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 128
-#pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
+  #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
+  #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
+  #pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 128
+  #pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
 //
-x_buff:
-  for (int i = 0; i < N; i++)
-  {
-#pragma HLS UNROLL factor = 16
+  x_buff:
+  for (int i = 0; i < N; i++) {
+    #pragma HLS UNROLL factor = 16
     x_buffer[i] = xq[i];
   }
-xs_buff:
-  for (int j = 0; j <= N - GS; j += GS)
-  {
-#pragma HLS UNROLL factor = 4
+  xs_buff:
+  for (int j = 0; j <= N - GS; j += GS) {
+    #pragma HLS UNROLL factor = 4
     xs_buffer[j / GS] = xs[j / GS];
   }
 
-w_buff:
-  for (int i = 0; i < N * D; i++)
-  {
-#pragma HLS UNROLL factor = 128
+  w_buff:
+  for (int i = 0; i < N * D; i++) {
+    #pragma HLS UNROLL factor = 128
     w_buffer[i] = wq[i];
   }
 
-ws_buff:
-  for (int i = 0; i < N * D / GS; i++)
-  {
-#pragma HLS UNROLL factor = 32
+  ws_buff:
+  for (int i = 0; i < N * D / GS; i++) {
+    #pragma HLS UNROLL factor = 32
     ws_buffer[i] = ws[i];
   }
 
   int i;
-  for (i = 0; i < D; i++)
-  {
-#pragma HLS PIPEPLINE
+  for (i = 0; i < D; i++) {
+    #pragma HLS PIPEPLINE
     float val = 0.0f;
     // start index of row i
     const int in = i * N;
@@ -172,15 +164,13 @@ ws_buff:
     // do the matmul in groups of GS
 
     int j;
-  matmul3:
-    for (j = 0; j <= N - GS; j += GS)
-    {
-#pragma HLS UNROLL
+    matmul3:
+    for (j = 0; j <= N - GS; j += GS) {
+      #pragma HLS UNROLL
       int32_t ival = 0;
-    matmul4:
-      for (int k = 0; k < GS; k++)
-      {
-#pragma HLS UNROLL
+      matmul4:
+      for (int k = 0; k < GS; k++) {
+        #pragma HLS UNROLL
         ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[in + j + k]);
       }
       val += ((float)ival) * ws_buffer[in_s + j / GS] * xs_buffer[j / GS];
@@ -189,186 +179,91 @@ ws_buff:
   }
 }
 
-// template <int N, int D>
-// void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
-// {
-//   // W (d,n) @ x (n,) -> xout (d,)
-//   // by far the most amount of time is spent inside this little function
-//   // inputs to this function are both quantized
-
-//   // wq - quantized weight matrix
-//   // ws - scaling factor for each row of wq
-//   // xq - quantized input vector
-//   // xs - scaling factor for xq
-//   // xout - output vector
-
-//   static int8_t x_buffer[N];
-//   static float xs_buffer[N / GS];
-//   // float out_buffer[D];
-
-// #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
-// #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
-// //
-// x_buff:
-//   for (int i = 0; i < N; i++)
-//   {
-// #pragma HLS UNROLL factor = 16
-//     x_buffer[i] = xq[i];
-//   }
-// xs_buff:
-//   for (int j = 0; j <= N - GS; j += GS)
-//   {
-// #pragma HLS UNROLL factor = 4
-//     xs_buffer[j / GS] = xs[j / GS];
-//   }
-
-//   int i;
-//   for (i = 0; i < D; i++)
-//   {
-// #pragma HLS PIPELINE
-//     float val = 0.0f;
-//     int8_t w_buffer[N];
-//     float ws_buffer[N / GS];
-// #pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
-// #pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
-//     // start index of row i
-//     const int in = i * N;
-//   matmul1:
-//     for (int j = 0; j < N; j++)
-//     {
-//       // #pragma HLS UNROLL factor
-//       w_buffer[j] = wq[j + in];
-//     }
-//   matmul2:
-//     const int in_s = i * N / GS;
-//     const int groups = N / GS;
-//     for (int j = 0; j < groups; j++)
-//     {
-//       // #pragma HLS UNROLL factor
-//       ws_buffer[j] = ws[in_s + j];
-//     }
-
-//     // do the matmul in groups of GS
-//     int j;
-//   matmul3:
-//     for (j = 0; j <= N - GS; j += GS)
-//     {
-//       // #pragma HLS UNROLL
-//       int32_t ival = 0;
-//     matmul4:
-//       for (int k = 0; k < GS; k++)
-//       {
-//         // #pragma HLS UNROLL
-//         ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
-//       }
-//       val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
-//     }
-//     xout[i] = val;
-//   }
-// }
-
-template <int N, int D, int GS=128>
-void matmul(
-    float* xout,
-    const int8_t* __restrict xq,
-    const float* __restrict xs,
-    const int8_t* __restrict wq,
-    const float* __restrict ws)
+template <int N, int D>
+void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
-    // 创新点1: 分组并行计算架构
-    constexpr int GROUPS = N / GS;
-    static_assert(N % GS == 0, "N must be divisible by GS");
+  // W (d,n) @ x (n,) -> xout (d,)
+  // by far the most amount of time is spent inside this little function
+  // inputs to this function are both quantized
 
-    // 创新点2: 输入向量静态展开
-    int8_t x_buffer[N];
-    float xs_buffer[GROUPS];
-    #pragma HLS ARRAY_PARTITION variable=x_buffer cyclic factor=32
-    #pragma HLS ARRAY_PARTITION variable=xs_buffer complete
+  // wq - quantized weight matrix
+  // ws - scaling factor for each row of wq
+  // xq - quantized input vector
+  // xs - scaling factor for xq
+  // xout - output vector
 
-    // 阶段1: 并行加载输入
-    load_input:
-    for (int i = 0; i < N; i++) {
-        #pragma HLS PIPELINE II=1
-        #pragma HLS UNROLL factor=32
-        x_buffer[i] = xq[i];
-        if (i % GS == 0) {
-            xs_buffer[i/GS] = xs[i/GS];
-        }
+  static int8_t x_buffer[N];
+  static float xs_buffer[N / GS];
+  // float out_buffer[D];
+
+  #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
+  #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
+//
+  x_buff:
+  for (int i = 0; i < N; i++) {
+    #pragma HLS UNROLL factor = 16
+    x_buffer[i] = xq[i];
+  }
+  
+  xs_buff:
+  for (int j = 0; j <= N - GS; j += GS) {
+    #pragma HLS UNROLL factor = 4
+    xs_buffer[j / GS] = xs[j / GS];
+  }
+
+  int i;
+  for (i = 0; i < D; i++) {
+    #pragma HLS PIPELINE
+    float val = 0.0f;
+    int8_t w_buffer[N];
+    float ws_buffer[N / GS];
+    #pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
+    #pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
+    // start index of row i
+    const int in = i * N;
+    matmul1:
+    for (int j = 0; j < N; j++) {
+      // #pragma HLS UNROLL factor
+      w_buffer[j] = wq[j + in];
+    }
+    matmul2:
+    const int in_s = i * N / GS;
+    const int groups = N / GS;
+    for (int j = 0; j < groups; j++) {
+      // #pragma HLS UNROLL factor
+      ws_buffer[j] = ws[in_s + j];
     }
 
-    // 阶段2: 流水线化输出计算
-    output_loop:
-    for (int i = 0; i < D; i++) {
-        #pragma HLS PIPELINE II=1
-        
-        // 创新点3: 权重行缓存优化
-        int8_t w_row[N];
-        #pragma HLS ARRAY_PARTITION variable=w_row cyclic factor=32
-        
-        load_weight_row:
-        for (int j = 0; j < N; j++) {
-            #pragma HLS UNROLL factor=4
-            w_row[j] = wq[i * N + j];
-        }
-
-        // 创新点4: 分组点积并行化
-        float acc = 0;
-        group_dot:
-        for (int g = 0; g < GROUPS; g++) {
-            #pragma HLS UNROLL factor=4
-            
-            int32_t sum = 0;
-            #pragma HLS BIND_OP variable=sum op=add impl=fabric
-            dot_product:
-            for (int j = 0; j < GS; j++) {
-                #pragma HLS UNROLL
-                sum += x_buffer[g*GS + j] * w_row[g*GS + j];
-            }
-            
-            // 创新点5: 融合缩放计算
-            acc += xs_buffer[g] * ws[i * GROUPS + g] * (float)sum;
-        }
-        
-        xout[i] = acc;
+    // do the matmul in groups of GS
+    int j;
+    matmul3:
+    for (j = 0; j <= N - GS; j += GS) {
+      // #pragma HLS UNROLL
+      int32_t ival = 0;
+      matmul4:
+      for (int k = 0; k < GS; k++) {
+        // #pragma HLS UNROLL
+        ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
+      }
+      val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
     }
+    xout[i] = val;
+  }
 }
 
-
-
-
-extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out)
-{
-
-  // ----------------------------------------------------------
-    // 预加载权重到 on-chip BRAM（只执行一次）
-    // ----------------------------------------------------------
-    // static bool weights_preloaded = false;
-    // if (!weights_preloaded) {
-    //     preload_all_weights:
-    //     for (int i = 0; i < dim; i++) {
-    //         #pragma HLS PIPELINE II=1
-    //         memcpy(w_all[i],
-    //                transformer->weights.wq[i].q,
-    //                dim * sizeof(int8_t));
-    //         memcpy(ws_all[i],
-    //                transformer->weights.wq[i].s,
-    //                (dim/GS) * sizeof(float));
-    //     }
-    //     weights_preloaded = true;
-    // }
-
-#pragma HLS INTERFACE m_axi port=transformer offset=slave bundle=gmem0
-#pragma HLS INTERFACE m_axi port=out offset=slave bundle=gmem1
-#pragma HLS INTERFACE m_axi port=key_cache offset=slave bundle=gmem2
-#pragma HLS INTERFACE m_axi port=value_cache offset=slave bundle=gmem3
-
-#pragma HLS INTERFACE s_axilite port=transformer bundle=control
-#pragma HLS INTERFACE s_axilite port=out bundle=control
-#pragma HLS INTERFACE s_axilite port=key_cache bundle=control
-#pragma HLS INTERFACE s_axilite port=value_cache bundle=control
-#pragma HLS INTERFACE s_axilite port=token bundle=control
-#pragma HLS INTERFACE s_axilite port=pos bundle=control
-#pragma HLS INTERFACE s_axilite port=return bundle=control
+extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out) {
+  #pragma HLS INTERFACE m_axi port=transformer offset=slave bundle=gmem0
+  #pragma HLS INTERFACE m_axi port=out offset=slave bundle=gmem1
+  #pragma HLS INTERFACE m_axi port=key_cache offset=slave bundle=gmem2
+  #pragma HLS INTERFACE m_axi port=value_cache offset=slave bundle=gmem3
+  
+  #pragma HLS INTERFACE s_axilite port=transformer bundle=control
+  #pragma HLS INTERFACE s_axilite port=out bundle=control
+  #pragma HLS INTERFACE s_axilite port=key_cache bundle=control
+  #pragma HLS INTERFACE s_axilite port=value_cache bundle=control
+  #pragma HLS INTERFACE s_axilite port=token bundle=control
+  #pragma HLS INTERFACE s_axilite port=pos bundle=control
+  #pragma HLS INTERFACE s_axilite port=return bundle=control
 
   // a few convenience variables
   auto w = &transformer->weights;
@@ -384,19 +279,19 @@ extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_hea
   static float k[(config.dim * config.n_kv_heads) / config.n_heads]; // key (dim,)
   static float v[(config.dim * config.n_kv_heads) / config.n_heads]; // value (dim,)
   static float att[config.n_heads * config.seq_len];                 // buffer for scores/attention values (n_heads, seq_len)
-#pragma HLS ARRAY_PARTITION variable = q cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = k cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = v cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = att cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = hq.q cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = hq.s cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = xq.q cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = xq.s cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = hb type = cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = hb2 type = cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = x type = cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = xb type = cyclic factor = UNROLL_FACTOR
-#pragma HLS ARRAY_PARTITION variable = xb2 type = cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = q cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = k cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = v cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = att cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = hq.q cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = hq.s cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = xq.q cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = xq.s cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = hb type = cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = hb2 type = cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = x type = cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = xb type = cyclic factor = UNROLL_FACTOR
+  #pragma HLS ARRAY_PARTITION variable = xb2 type = cyclic factor = UNROLL_FACTOR
   constexpr int kv_dim = (config.dim * config.n_kv_heads) / config.n_heads;
   constexpr int kv_mul = config.n_heads / config.n_kv_heads; // integer multiplier of the kv sharing in multiquery
   constexpr int head_size = dim / config.n_heads;
@@ -405,26 +300,24 @@ extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_hea
   std::memcpy(x, w->token_embedding_table + token * dim, dim * sizeof(float));
 
 // forward all the layers
-main_forward_loop:
-  for (int l = 0; l < config.n_layers; l++)
-  {
+  main_forward_loop:
+  for (int l = 0; l < config.n_layers; l++) {
     // attention rmsnorm
     rmsnorm<dim>(xb, x, w->rms_att_weight + l * dim);
 
     // qkv matmuls for this position
     quantize(&xq, xb, GS);
-    matmul<dim, dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
-    matmul<dim, kv_dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
-    matmul<dim, kv_dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
+    matmul<dim, dim>(q, xq.q, xq.s, (w->wq + l)->q, (w->wq + l)->s);
+    matmul<dim, kv_dim>(k, xq.q, xq.s, (w->wk + l)->q, (w->wk + l)->s);
+    matmul<dim, kv_dim>(v, xq.q, xq.s, (w->wv + l)->q, (w->wv + l)->s);
 
-  // RoPE relative positional encoding: complex-valued rotate q and k in each head
-  // Process the portion where both query and key vectors are involved (i < kv_dim)
-  rotation1:
+    // RoPE relative positional encoding: complex-valued rotate q and k in each head
+    // Process the portion where both query and key vectors are involved (i < kv_dim)
+    rotation1:
     // Rotation for both query and key vectors (i < kv_dim)
-    for (int i = 0; i < kv_dim; i += 2)
-    {
-#pragma HLS UNROLL factor = UNROLL_FACTOR
-#pragma HLS PIPELINE
+    for (int i = 0; i < kv_dim; i += 2) {
+      #pragma HLS UNROLL factor = UNROLL_FACTOR
+      #pragma HLS PIPELINE
       int head_dim = i % head_size;
       float freq = 1.0f / powf(10000.0f, head_dim / (float)head_size);
       float val = pos * freq;
@@ -443,11 +336,11 @@ main_forward_loop:
       k[i] = v0_k * fcr - v1_k * fci;
       k[i + 1] = v0_k * fci + v1_k * fcr;
     }
-  rotation2:
+    rotation2:
     // Rotation for only the query vector (i >= kv_dim)
     for (int i = kv_dim; i < dim; i += 2)
     {
-#pragma HLS PIPELINE
+      #pragma HLS PIPELINE
       int head_dim = i % head_size;
       float freq = 1.0f / powf(10000.0f, head_dim / (float)head_size);
       float val = pos * freq;
@@ -471,29 +364,26 @@ main_forward_loop:
     // multihead attention. iterate over all heads
     int h;
 
-  multihead_attention:
-    for (h = 0; h < n_heads; h++)
-    {
+    multihead_attention:
+    for (h = 0; h < n_heads; h++) {
       //  get the query vector for this head
       // float *q_t = q + h * head_size;
       const int q_offset = h * head_size;
       // attention scores for this head
       // float *att_t = att + h * seq_len;
       const int att_offset = h * seq_len;
-    // iterate over all timesteps, including the current one
-    iterate:
-      for (int t = 0; t <= pos; t++)
-      {
-#pragma HLS PIPELINE
-#pragma HLS loop_tripcount min = 0 max = 257 avg = 129
+      // iterate over all timesteps, including the current one
+      iterate:
+      for (int t = 0; t <= pos; t++) {
+        #pragma HLS PIPELINE
+        #pragma HLS loop_tripcount min = 0 max = 257 avg = 129
         // get the key vector for this head and at this timestep
         // float *k_t = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
         const int key_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
         // calculate the attention score as the dot product of q and k
         float score = 0.0f;
-        for (int i = 0; i < head_size; i++)
-        {
-#pragma HLS unroll
+        for (int i = 0; i < head_size; i++) {
+          #pragma HLS unroll
           score += q[i + q_offset] * key_cache[i + key_offset];
         }
         score /= sqrtf(head_size);
@@ -508,21 +398,19 @@ main_forward_loop:
       // float *xb_t = xb + h * head_size;
       const int xb_offset = h * head_size;
       memset(xb + xb_offset, 0, head_size * sizeof(float));
-    acc:
-      for (int t = 0; t <= pos; t++)
-      {
-#pragma HLS loop_tripcount min = 0 max = 257 avg = 129
-#pragma HLS PIPELINE
+      acc:
+      for (int t = 0; t <= pos; t++) {
+        #pragma HLS loop_tripcount min = 0 max = 257 avg = 129
+        #pragma HLS PIPELINE
         // get the value vector for this head and at this timestep
         // float *v_t = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
         // get the attention weight for this timestep
         const int v_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
         float a = att[t + att_offset];
-      // accumulate the weighted value into xb
-      acc_inner:
-        for (int i = 0; i < head_size; i++)
-        {
-#pragma HLS unroll
+        // accumulate the weighted value into xb
+        acc_inner:
+        for (int i = 0; i < head_size; i++) {
+        #pragma HLS unroll
           xb[i + xb_offset] += a * value_cache[i + v_offset];
         }
       }
@@ -530,13 +418,13 @@ main_forward_loop:
 
     // final matmul to get the output of the attention
     quantize(&xq, xb, GS);
-    matmul<dim, dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
+    matmul<dim, dim>(xb2, xq.q, xq.s, (w->wo + l)->q, (w->wo + l)->s);
 
-  // residual connection back into x
-  residual:
+    // residual connection back into x
+    residual:
     for (int i = 0; i < dim; i++)
     {
-#pragma HLS UNROLL factor = 64 skip_exit_check
+      #pragma HLS UNROLL factor = 64 skip_exit_check
       x[i] += xb2[i];
     }
 
@@ -546,15 +434,14 @@ main_forward_loop:
     // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
     // first calculate self.w1(x) and self.w3(x)
     quantize(&xq, xb, GS);
-    matmul<dim, hidden_dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
-    matmul<dim, hidden_dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
+    matmul<dim, hidden_dim>(hb, xq.q, xq.s, (w->w1 + l)->q, (w->w1 + l)->s);
+    matmul<dim, hidden_dim>(hb2, xq.q, xq.s, (w->w3 + l)->q, (w->w3 + l)->s);
     float hb_out[hidden_dim];
-#pragma HLS array_partition variable = hb_out type = cyclic factor = 16
-  swi_glu:
-    for (int i = 0; i < hidden_dim; i++)
-    {
-#pragma HLS UNROLL factor = 4
-#pragma HLS PIPELINE
+    #pragma HLS array_partition variable = hb_out type = cyclic factor = 16
+    swi_glu:
+    for (int i = 0; i < hidden_dim; i++) {
+      #pragma HLS UNROLL factor = 4
+      #pragma HLS PIPELINE
       float val = hb[i];
       // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
       val *= (1.0f / (1.0f + expf(-val)));
@@ -566,13 +453,12 @@ main_forward_loop:
 
     // final matmul to get the output of the ffn
     quantize(&hq, hb, GS);
-    matmul<hidden_dim, dim, GS>(q, xq.q, xq.s, w->wq[l].q, w->wq[l].s);
+    matmul<hidden_dim, dim>(xb, hq.q, hq.s, (w->w2 + l)->q, (w->w2 + l)->s);
 
-  // residual connection
-  residual2:
-    for (int i = 0; i < dim; i++)
-    {
-#pragma HLS UNROLL factor = 16 skip_exit_check
+    // residual connection
+    residual2:
+    for (int i = 0; i < dim; i++) {
+      #pragma HLS UNROLL factor = 16 skip_exit_check
       x[i] += xb[i];
     }
   }
@@ -582,5 +468,6 @@ main_forward_loop:
 
   // classifier into logits
   quantize(&xq, x, GS);
-  matmul<dim, vocab_size, GS>(out, xq.q, xq.s, w->wcls->q, w->wcls->s);
+  matmul<dim, vocab_size>(out, xq.q, xq.s, w->wcls->q, w->wcls->s);
 }
+
