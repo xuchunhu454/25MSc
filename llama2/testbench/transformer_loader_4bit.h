@@ -49,7 +49,7 @@ void init_quantized_tensors(void **ptr, QuantizedTensor<SIZE> *tensor, int n, in
         int8_t packed = ((int8_t*)p)[byte_idx];
         tensor[i].q[j] = decode_int4(packed, is_high);
 
-        // ✅ 打印前 8 个解码值
+        // 可选调试输出
         if (i == 0 && j < 8) {
           std::cout << "[C++] tensor[" << i << "].q[" << j << "] = "
                     << static_cast<int>(tensor[i].q[j]) << std::endl;
@@ -62,17 +62,17 @@ void init_quantized_tensors(void **ptr, QuantizedTensor<SIZE> *tensor, int n, in
       p = (int8_t *)p + size_each;
     }
 
-    // 读取缩放因子
-    std::memcpy(tensor[i].s, p, (size_each / GS) * sizeof(float));
+    // 读取 scale（修复：使用 byte pointer 加 offset）
+    int num_scales = size_each / GS;
+    std::memcpy(tensor[i].s, p, num_scales * sizeof(float));
 
-    // ✅ 打印前 2 个缩放因子
     if (i == 0) {
-      for (int s = 0; s < std::min(2, size_each / GS); s++) {
+      for (int s = 0; s < std::min(2, num_scales); s++) {
         std::cout << "[C++] tensor[" << i << "].s[" << s << "] = " << tensor[i].s[s] << std::endl;
       }
     }
 
-    p = (float *)p + size_each / GS;
+    p = (void *)((char *)p + num_scales * sizeof(float));  // ✅ 修复这里的指针偏移
   }
   *ptr = p;
 }
