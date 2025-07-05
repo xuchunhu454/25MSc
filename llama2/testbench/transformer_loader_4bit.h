@@ -11,14 +11,32 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+
 // 判断使用 int4 模型（版本 3）
-int global_version = 2;
+int global_version = 3;
 
 // 解码 int4（packed 中的低 4 位或高 4 位）
 inline int8_t decode_int4(int8_t packed, int idx) {
   int val = (idx == 0) ? (packed & 0x0F) : ((packed >> 4) & 0x0F);
   return (val >= 8) ? val - 16 : val;
 }
+
+template <
+    int dim, int hidden_dim,
+    int n_layers, int n_heads,
+    int n_kv_heads,
+    int vocab_size, int seq_len,
+    int GS
+>
+void build_transformer(
+    Transformer<dim,hidden_dim,n_layers,n_heads,n_kv_heads,vocab_size,seq_len,GS> *t,
+    //const std::string& checkpoint_path  
+    const std::string checkpoint_path  
+)
+{
+ read_checkpoint(checkpoint_path, &t->config, &t->weights);
+}
+;
 
 template <int SIZE>
 void init_quantized_tensors(void **ptr, QuantizedTensor<SIZE> *tensor, int n, int size_each) {
