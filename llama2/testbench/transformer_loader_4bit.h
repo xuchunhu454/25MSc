@@ -39,30 +39,31 @@ void build_transformer(
 
 template <int SIZE>
 void init_quantized_tensors(void **ptr, QuantizedTensor<SIZE> *tensor, int n, int size_each) {
-  void *p = *ptr;
+  char *p = (char *)*ptr;
   for (int i = 0; i < n; i++) {
     if (global_version == 3) {
-      // 使用 int4: 每个 byte 存两个权重
+      // int4：每两个 weights 压缩成 1 byte
+      int packed_bytes = size_each / 2;
       for (int j = 0; j < size_each; j++) {
         int byte_idx = j / 2;
         int is_high = j % 2;
         int8_t packed = ((int8_t*)p)[byte_idx];
         tensor[i].q[j] = decode_int4(packed, is_high);
 
-        // 可选调试输出
+        // debug 打印前 8 项
         if (i == 0 && j < 8) {
           std::cout << "[C++] tensor[" << i << "].q[" << j << "] = "
                     << static_cast<int>(tensor[i].q[j]) << std::endl;
         }
       }
-      p = (int8_t*)p + size_each / 2;
+      p += packed_bytes;
     } else {
-      // 默认 int8 加载
+      // int8 直接拷贝
       std::memcpy(tensor[i].q, p, size_each * sizeof(int8_t));
-      p = (int8_t *)p + size_each;
+      p += size_each;
     }
 
-    // 读取 scale（修复：使用 byte pointer 加 offset）
+    // scale 数量
     int num_scales = size_each / GS;
     std::memcpy(tensor[i].s, p, num_scales * sizeof(float));
 
@@ -72,10 +73,12 @@ void init_quantized_tensors(void **ptr, QuantizedTensor<SIZE> *tensor, int n, in
       }
     }
 
-    p = (void *)((char *)p + num_scales * sizeof(float));  // ✅ 修复这里的指针偏移
+    p += num_scales * sizeof(float);
   }
-  *ptr = p;
+
+  *ptr = (void *)p;
 }
+
 
 
 template <int dim, int hidden_dim, int n_layers, int n_heads, int n_kv_heads, int vocab_size, int seq_len, int GS>
