@@ -179,137 +179,141 @@ void matmul_old(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
   }
 }
 
-// template <int N, int D>
-// void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
-// {
-//   // W (d,n) @ x (n,) -> xout (d,)
-//   // by far the most amount of time is spent inside this little function
-//   // inputs to this function are both quantized
-
-//   // wq - quantized weight matrix
-//   // ws - scaling factor for each row of wq
-//   // xq - quantized input vector
-//   // xs - scaling factor for xq
-//   // xout - output vector
-
-//   static int8_t x_buffer[N];
-//   static float xs_buffer[N / GS];
-//   // float out_buffer[D];
-
-//   #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
-//   #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
-// //
-//   x_buff:
-//   for (int i = 0; i < N; i++) {
-//     #pragma HLS UNROLL factor = 16
-//     x_buffer[i] = xq[i];
-//   }
-  
-//   xs_buff:
-//   for (int j = 0; j <= N - GS; j += GS) {
-//     #pragma HLS UNROLL factor = 4
-//     xs_buffer[j / GS] = xs[j / GS];
-//   }
-
-//   int i;
-//   for (i = 0; i < D; i++) {
-//     #pragma HLS PIPELINE
-//     float val = 0.0f;
-//     int8_t w_buffer[N];
-//     float ws_buffer[N / GS];
-//     #pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
-//     #pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
-//     // start index of row i
-//     const int in = i * N;
-//     matmul1:
-//     for (int j = 0; j < N; j++) {
-//       // #pragma HLS UNROLL factor
-//       w_buffer[j] = wq[j + in];
-//     }
-//     matmul2:
-//     const int in_s = i * N / GS;
-//     const int groups = N / GS;
-//     for (int j = 0; j < groups; j++) {
-//       // #pragma HLS UNROLL factor
-//       ws_buffer[j] = ws[in_s + j];
-//     }
-
-//     // do the matmul in groups of GS
-//     int j;
-//     matmul3:
-//     for (j = 0; j <= N - GS; j += GS) {
-//       // #pragma HLS UNROLL
-//       int32_t ival = 0;
-//       matmul4:
-//       for (int k = 0; k < GS; k++) {
-//         // #pragma HLS UNROLL
-//         ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
-//       }
-//       val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
-//     }
-//     xout[i] = val;
-//   }
-// }
-
-inline int8_t decode_int4(int8_t packed, int idx) {
-  int val = (idx % 2 == 0) ? (packed & 0x0F) : ((packed >> 4) & 0x0F);
-  // 转换成有符号值（0~15 → -8~7）
-  return (val >= 8) ? val - 16 : val;
-}
-
-template <int N, int D>
-void matmul(
-  float* xout,
-  const int8_t* xq, const float* xs,
-  const int8_t* wq_packed, const float* ws
-) {
+template <int N, int D, int GS>
+void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
+{
   static int8_t x_buffer[N];
-  static float  xs_buffer[N / GS];
+  static float xs_buffer[N / GS];
 
 #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
 #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
 
-  // 1. 缓存输入向量 xq 和其缩放因子 xs
+  // Load xq
 x_buff:
   for (int i = 0; i < N; i++) {
 #pragma HLS UNROLL factor = 16
     x_buffer[i] = xq[i];
   }
+
+  // Load xs
 xs_buff:
-  for (int j = 0; j < N / GS; j++) {
+  for (int j = 0; j <= N - GS; j += GS) {
 #pragma HLS UNROLL factor = 4
-    xs_buffer[j] = xs[j];
+    xs_buffer[j / GS] = xs[j / GS];
   }
 
-  // 2. 遍历每一行输出（即每个输出通道）
-main_loop:
+  // Output loop over D
   for (int i = 0; i < D; i++) {
 #pragma HLS PIPELINE
-    float acc = 0.0f;
+    float val = 0.0f;
+    int8_t w_buffer[N];
+    float ws_buffer[N / GS];
+#pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
+#pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
 
-    const int base_idx = (i * N) / 2;     // 2 weights packed per byte
-    const int scale_idx = (i * N) / GS;
-
-    // 3. 分组 dot product
-group_loop:
-    for (int j = 0; j < N; j += GS) {
-#pragma HLS UNROLL
-      int32_t partial_sum = 0;
-
-    dot_loop:
-      for (int k = 0; k < GS; k++) {
-#pragma HLS UNROLL
-        const int w_idx = base_idx + (j + k) / 2;
-        int8_t w_decoded = decode_int4(wq_packed[w_idx], (j + k) % 2);
-        partial_sum += (int32_t)x_buffer[j + k] * (int32_t)w_decoded;
-      }
-
-      acc += ((float)partial_sum) * xs_buffer[j / GS] * ws[scale_idx + j / GS];
+    // Load wq[i]
+    const int in = i * N;
+matmul1:
+    for (int j = 0; j < N; j++) {
+#pragma HLS UNROLL factor = 32
+      w_buffer[j] = wq[in + j];
     }
 
-    xout[i] = acc;
+    // Load ws[i]
+    const int in_s = i * N / GS;
+    const int groups = N / GS;
+matmul2:
+    for (int j = 0; j < groups; j++) {
+#pragma HLS UNROLL factor = 32
+      ws_buffer[j] = ws[in_s + j];
+    }
+
+    // Matmul accumulation (optimized)
+    int j;
+matmul3:
+    for (j = 0; j <= N - GS; j += GS) {
+      int32_t partial[GS];
+#pragma HLS ARRAY_PARTITION variable = partial complete
+
+matmul4:
+      for (int k = 0; k < GS; k++) {
+#pragma HLS UNROLL
+        partial[k] = ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
+      }
+
+      // reduction (adder tree, simple sum here)
+      int32_t ival = 0;
+      for (int k = 0; k < GS; k++) {
+        ival += partial[k];
+      }
+
+      val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
+    }
+
+    xout[i] = val;
   }
 }
+
+
+// inline int8_t decode_int4(int8_t packed, int idx) {
+//   int val = (idx % 2 == 0) ? (packed & 0x0F) : ((packed >> 4) & 0x0F);
+//   // Convert to a signed value (0~15 → -8~7)
+//   return (val >= 8) ? val - 16 : val;
+// }
+
+// template <int N, int D>
+// void matmul(
+//   float* xout,
+//   const int8_t* xq, const float* xs,
+//   const int8_t* wq_packed, const float* ws
+// ) {
+//   static int8_t x_buffer[N];
+//   static float  xs_buffer[N / GS];
+
+// #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
+// #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
+
+//   // 1. Cache the input vector xq and its scaling factor xs
+// x_buff:
+//   for (int i = 0; i < N; i++) {
+// #pragma HLS UNROLL factor = 16
+//     x_buffer[i] = xq[i];
+//   }
+// xs_buff:
+//   for (int j = 0; j < N / GS; j++) {
+// #pragma HLS UNROLL factor = 4
+//     xs_buffer[j] = xs[j];
+//   }
+
+//   // 2. Iterate over each output line (i.e. each output channel)
+// main_loop:
+//   for (int i = 0; i < D; i++) {
+// #pragma HLS PIPELINE
+//     float acc = 0.0f;
+
+//     const int base_idx = (i * N) / 2;     // 2 weights packed per byte
+//     const int scale_idx = (i * N) / GS;
+
+//     // 3. Group dot product
+// group_loop:
+//     for (int j = 0; j < N; j += GS) {
+// #pragma HLS UNROLL
+//       int32_t partial_sum = 0;
+
+//     dot_loop:
+//       for (int k = 0; k < GS; k++) {
+// #pragma HLS UNROLL
+//         const int w_idx = base_idx + (j + k) / 2;
+//         int8_t w_decoded = decode_int4(wq_packed[w_idx], (j + k) % 2);
+//         partial_sum += (int32_t)x_buffer[j + k] * (int32_t)w_decoded;
+//       }
+
+//       acc += ((float)partial_sum) * xs_buffer[j / GS] * ws[scale_idx + j / GS];
+//     }
+
+//     xout[i] = acc;
+//   }
+// }
 
 
 extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len, GS> *transformer, int token, int pos, float key_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float value_cache[n_layers * seq_len * ((dim * n_kv_heads) / n_heads)], float *out) {
