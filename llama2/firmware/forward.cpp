@@ -179,7 +179,8 @@ void matmul_old(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
   }
 }
 
-template <int N, int D, int GS>
+
+template <int N, int D>
 void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
   static int8_t x_buffer[N];
@@ -188,38 +189,34 @@ void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
 #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
 
-  // Load xq
 x_buff:
   for (int i = 0; i < N; i++) {
 #pragma HLS UNROLL factor = 16
     x_buffer[i] = xq[i];
   }
 
-  // Load xs
 xs_buff:
   for (int j = 0; j <= N - GS; j += GS) {
 #pragma HLS UNROLL factor = 4
     xs_buffer[j / GS] = xs[j / GS];
   }
 
-  // Output loop over D
   for (int i = 0; i < D; i++) {
 #pragma HLS PIPELINE
     float val = 0.0f;
     int8_t w_buffer[N];
     float ws_buffer[N / GS];
+
 #pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
 #pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
 
-    // Load wq[i]
     const int in = i * N;
 matmul1:
     for (int j = 0; j < N; j++) {
 #pragma HLS UNROLL factor = 32
-      w_buffer[j] = wq[in + j];
+      w_buffer[j] = wq[j + in];
     }
 
-    // Load ws[i]
     const int in_s = i * N / GS;
     const int groups = N / GS;
 matmul2:
@@ -228,10 +225,8 @@ matmul2:
       ws_buffer[j] = ws[in_s + j];
     }
 
-    // Matmul accumulation (optimized)
-    int j;
 matmul3:
-    for (j = 0; j <= N - GS; j += GS) {
+    for (int j = 0; j <= N - GS; j += GS) {
       int32_t partial[GS];
 #pragma HLS ARRAY_PARTITION variable = partial complete
 
@@ -241,9 +236,10 @@ matmul4:
         partial[k] = ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
       }
 
-      // reduction (adder tree, simple sum here)
+      // reduction
       int32_t ival = 0;
       for (int k = 0; k < GS; k++) {
+#pragma HLS UNROLL
         ival += partial[k];
       }
 
@@ -253,6 +249,7 @@ matmul4:
     xout[i] = val;
   }
 }
+
 
 
 // inline int8_t decode_int4(int8_t packed, int idx) {
