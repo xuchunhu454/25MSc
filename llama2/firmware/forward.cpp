@@ -183,54 +183,65 @@ void matmul_old(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 template <int N, int D>
 void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
+  // W (d,n) @ x (n,) -> xout (d,)
+  // by far the most amount of time is spent inside this little function
+  // inputs to this function are both quantized
+
+  // wq - quantized weight matrix
+  // ws - scaling factor for each row of wq
+  // xq - quantized input vector
+  // xs - scaling factor for xq
+  // xout - output vector
+
   static int8_t x_buffer[N];
   static float xs_buffer[N / GS];
+  // float out_buffer[D];
 
-#pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
-#pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
-
-x_buff:
+  #pragma HLS ARRAY_PARTITION variable = x_buffer type = cyclic factor = 16
+  #pragma HLS ARRAY_PARTITION variable = xs_buffer type = cyclic factor = 4
+//
+  x_buff:
   for (int i = 0; i < N; i++) {
-#pragma HLS UNROLL factor = 16
+    #pragma HLS UNROLL factor = 16
     x_buffer[i] = xq[i];
   }
-
-xs_buff:
+  
+  xs_buff:
   for (int j = 0; j <= N - GS; j += GS) {
-#pragma HLS UNROLL factor = 4
+    #pragma HLS UNROLL factor = 4
     xs_buffer[j / GS] = xs[j / GS];
   }
 
-  for (int i = 0; i < D; i++) {
-#pragma HLS PIPELINE
+  int i;
+  for (i = 0; i < D; i++) {
+    #pragma HLS PIPELINE
     float val = 0.0f;
     int8_t w_buffer[N];
     float ws_buffer[N / GS];
-
-#pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
-#pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
-
+    #pragma HLS ARRAY_PARTITION variable = w_buffer type = cyclic factor = 32
+    #pragma HLS ARRAY_PARTITION variable = ws_buffer type = cyclic factor = 32
+    // start index of row i
     const int in = i * N;
-matmul1:
+    matmul1:
     for (int j = 0; j < N; j++) {
-#pragma HLS UNROLL factor = 32
+      #pragma HLS UNROLL factor = 32
       w_buffer[j] = wq[j + in];
     }
-
+    matmul2:
     const int in_s = i * N / GS;
     const int groups = N / GS;
-matmul2:
     for (int j = 0; j < groups; j++) {
-#pragma HLS UNROLL factor = 32
+      #pragma HLS UNROLL factor = 32
       ws_buffer[j] = ws[in_s + j];
     }
 
-matmul3:
-    for (int j = 0; j <= N - GS; j += GS) {
-      int32_t partial[GS];
-#pragma HLS ARRAY_PARTITION variable = partial complete
-
-matmul4:
+    // do the matmul in groups of GS
+    int j;
+    matmul3:
+    for (j = 0; j <= N - GS; j += GS) {
+      #pragma HLS ARRAY_PARTITION variable = partial complet
+      int32_t ival = 0;
+      matmul4:
       for (int k = 0; k < GS; k++) {
         #pragma HLS UNROLL
         ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
@@ -240,7 +251,6 @@ matmul4:
     xout[i] = val;
   }
 }
-
 
 
 // inline int8_t decode_int4(int8_t packed, int idx) {
