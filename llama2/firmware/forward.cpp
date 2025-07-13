@@ -232,20 +232,11 @@ matmul3:
 
 matmul4:
       for (int k = 0; k < GS; k++) {
-#pragma HLS UNROLL
-        partial[k] = ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
+        #pragma HLS UNROLL
+        ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
       }
-
-      // reduction
-      int32_t ival = 0;
-      for (int k = 0; k < GS; k++) {
-#pragma HLS UNROLL
-        ival += partial[k];
-      }
-
       val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
     }
-
     xout[i] = val;
   }
 }
