@@ -239,7 +239,7 @@ void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
     int j;
     matmul3:
     for (j = 0; j <= N - GS; j += GS) {
-      #pragma HLS ARRAY_PARTITION variable = partial complet
+      
       int32_t ival = 0;
       matmul4:
       for (int k = 0; k < GS; k++) {
