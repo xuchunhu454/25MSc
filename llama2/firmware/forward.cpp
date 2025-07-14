@@ -181,7 +181,7 @@ void matmul_old(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 
 
 template <int N, int D>
-void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
+void matmul_1(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
   // W (d,n) @ x (n,) -> xout (d,)
   // by far the most amount of time is spent inside this little function
@@ -247,6 +247,68 @@ void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
         ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
       }
       val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
+    }
+    xout[i] = val;
+  }
+}
+
+template <int N, int D>
+void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws) {
+  // Local on-chip buffers
+  int8_t x_buffer[N];
+  float xs_buffer[N / GS];
+
+  #pragma HLS ARRAY_PARTITION variable=x_buffer type=cyclic factor=16
+  #pragma HLS ARRAY_PARTITION variable=xs_buffer type=cyclic factor=4
+
+  // Load input xq and xs into local buffer
+  xq_load:
+  for (int i = 0; i < N; i++) {
+    #pragma HLS UNROLL factor=16
+    x_buffer[i] = xq[i];
+  }
+
+  xs_load:
+  for (int j = 0; j < N / GS; j++) {
+    #pragma HLS UNROLL factor=4
+    xs_buffer[j] = xs[j];
+  }
+
+  // Local cached weight and scale
+  static int8_t wq_local[D][N];
+  static float ws_local[D][N / GS];
+
+  #pragma HLS BIND_STORAGE variable=wq_local type=RAM_2P impl=bram
+  #pragma HLS BIND_STORAGE variable=ws_local type=RAM_2P impl=bram
+  #pragma HLS ARRAY_PARTITION variable=wq_local dim=2 type=cyclic factor=32
+  #pragma HLS ARRAY_PARTITION variable=ws_local dim=2 type=cyclic factor=4
+
+  // Preload all weights (wq and ws) into BRAM
+  preload_wq:
+  for (int i = 0; i < D; i++) {
+    #pragma HLS PIPELINE
+    for (int j = 0; j < N; j++) {
+      #pragma HLS UNROLL factor=32
+      wq_local[i][j] = wq[i * N + j];
+    }
+    for (int j = 0; j < N / GS; j++) {
+      #pragma HLS UNROLL factor=4
+      ws_local[i][j] = ws[i * (N / GS) + j];
+    }
+  }
+
+  // Compute
+  main_compute:
+  for (int i = 0; i < D; i++) {
+    #pragma HLS PIPELINE II=1
+    float val = 0.0f;
+    for (int j = 0; j <= N - GS; j += GS) {
+      int32_t ival = 0;
+      for (int k = 0; k < GS; k++) {
+        #pragma HLS UNROLL
+        ival += (int32_t)x_buffer[j + k] * (int32_t)wq_local[i][j + k];
+      }
+      val += ((float)ival) * ws_local[i][j / GS] * xs_buffer[j / GS];
     }
     xout[i] = val;
   }
