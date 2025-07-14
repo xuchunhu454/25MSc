@@ -316,9 +316,20 @@ void matmul_2(float *xout,
   }
 }
 
+#include <cassert>
+#include <cstdio>
+
 template <int N, int D, int GS>
 void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
+  // 确保维度有效
+  static_assert(N > 0 && D > 0 && GS > 0, "Dimensions must be positive");
+  static_assert(N % GS == 0, "N must be divisible by GS");
+  
+  // 添加详细的调试信息
+  printf("[matmul] Start: N=%d, D=%d, GS=%d, N/GS=%d\n", N, D, GS, N/GS);
+  printf("  xout=%p, xq=%p, xs=%p, wq=%p, ws=%p\n", xout, xq, xs, wq, ws);
+  
   // 使用静态存储避免栈溢出
   static int8_t x_buffer[N];
   static float xs_buffer[N / GS];
@@ -332,57 +343,102 @@ void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
   #pragma HLS ARRAY_PARTITION variable=ws_buffer cyclic factor=4
 
   // 加载输入向量 - 只执行一次
-  x_buff:
+  printf("  Loading input vector...\n");
   for (int i = 0; i < N; i++) {
     #pragma HLS UNROLL factor=16
-    x_buffer[i] = xq[i];
+    if (i < N) {
+      x_buffer[i] = xq[i];
+    } else {
+      printf("ERROR: x_buffer access out of bounds! i=%d, N=%d\n", i, N);
+      break;
+    }
   }
   
   // 加载输入缩放因子 - 只执行一次
-  xs_buff:
-  for (int j = 0; j < N / GS; j++) {
+  printf("  Loading input scales...\n");
+  const int xs_count = N / GS;
+  for (int j = 0; j < xs_count; j++) {
     #pragma HLS UNROLL factor=4
-    xs_buffer[j] = xs[j];
+    if (j < xs_count) {
+      xs_buffer[j] = xs[j];
+    } else {
+      printf("ERROR: xs_buffer access out of bounds! j=%d, xs_count=%d\n", j, xs_count);
+      break;
+    }
   }
 
   // 主处理循环 - 按行处理权重矩阵
-  row_loop:
+  printf("  Starting row processing...\n");
   for (int i = 0; i < D; i++) {
     #pragma HLS PIPELINE II=8  // 放宽流水线约束
     
+    printf("    Processing row %d/%d\n", i+1, D);
+    
     // 预加载当前行的权重
     const int row_offset = i * N;
-    w_load:
     for (int j = 0; j < N; j++) {
       #pragma HLS UNROLL factor=32
-      w_buffer[j] = wq[row_offset + j];
+      const int wq_index = row_offset + j;
+      if (j < N && wq_index < D * N) {
+        w_buffer[j] = wq[wq_index];
+      } else {
+        printf("ERROR: wq access out of bounds! j=%d, wq_index=%d, max=%d\n", 
+               j, wq_index, D*N-1);
+        break;
+      }
     }
     
     // 预加载当前行的缩放因子
     const int scale_offset = i * (N / GS);
-    ws_load:
-    for (int j = 0; j < N / GS; j++) {
+    const int ws_count = N / GS;
+    for (int j = 0; j < ws_count; j++) {
       #pragma HLS UNROLL factor=4
-      ws_buffer[j] = ws[scale_offset + j];
+      const int ws_index = scale_offset + j;
+      if (j < ws_count && ws_index < D * ws_count) {
+        ws_buffer[j] = ws[ws_index];
+      } else {
+        printf("ERROR: ws access out of bounds! j=%d, ws_index=%d, max=%d\n", 
+               j, ws_index, D*ws_count-1);
+        break;
+      }
     }
 
     // 计算点积（分组处理）
     float val = 0.0f;
-    group_loop:
     for (int j = 0; j < N; j += GS) {
       #pragma HLS UNROLL factor=4  // 部分展开组循环
       
       int32_t ival = 0;
-      dot_product:
       for (int k = 0; k < GS; k++) {
         #pragma HLS UNROLL
-        ival += (int32_t)x_buffer[j + k] * (int32_t)w_buffer[j + k];
+        const int index = j + k;
+        if (index < N) {
+          ival += (int32_t)x_buffer[index] * (int32_t)w_buffer[index];
+        } else {
+          printf("ERROR: Dot product access out of bounds! j=%d, k=%d, index=%d, N=%d\n", 
+                 j, k, index, N);
+          break;
+        }
       }
-      val += (float)ival * ws_buffer[j / GS] * xs_buffer[j / GS];
+      
+      const int group_idx = j / GS;
+      if (group_idx < xs_count) {
+        val += (float)ival * ws_buffer[group_idx] * xs_buffer[group_idx];
+      } else {
+        printf("ERROR: Group index out of bounds! group_idx=%d, xs_count=%d\n", 
+               group_idx, xs_count);
+      }
     }
     
-    xout[i] = val;
+    if (i < D) {
+      xout[i] = val;
+      printf("    Row %d completed, val=%.4f\n", i, val);
+    } else {
+      printf("ERROR: xout access out of bounds! i=%d, D=%d\n", i, D);
+    }
   }
+  
+  printf("[matmul] Completed\n");
 }
 
 // inline int8_t decode_int4(int8_t packed, int idx) {
