@@ -436,7 +436,7 @@ extern "C" void forward(Transformer<dim, hidden_dim, n_layers, n_heads, n_kv_hea
     // qkv matmuls for this position
     quantize(&xq, xb, GS);
     matmul<dim, dim, GS>(q, xq.q, xq.s, (w->wq + l)->q, (w->wq + l)->s);
-    matmul<dim, kv_dim, GS, GS>(k, xq.q, xq.s, (w->wk + l)->q, (w->wk + l)->s);
+    matmul<dim, kv_dim, GS>(k, xq.q, xq.s, (w->wk + l)->q, (w->wk + l)->s);
     matmul<dim, kv_dim, GS>(v, xq.q, xq.s, (w->wv + l)->q, (w->wv + l)->s);
 
     // RoPE relative positional encoding: complex-valued rotate q and k in each head
