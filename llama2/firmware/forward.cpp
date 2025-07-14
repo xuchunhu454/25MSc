@@ -317,75 +317,90 @@ void matmul_2(float *xout,
 }
 
 template <int N, int D>
-void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
+void matmul_1(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
-  // 假设GS为128（根据原始代码推断），保持与原始代码兼容
-  constexpr int GS = 64;
-  const int groups = N / GS;
-
-  // 静态缓冲区 - 避免在循环内分配
+  // W (d,n) @ x (n,) -> xout (d,)
+  // 保留所有原始注释和结构
   static int8_t x_buffer[N];
-  static float xs_buffer[groups];
-  static int8_t w_buffer[N];  // 行权重缓冲区
-  static float ws_buffer[groups];  // 行缩放因子缓冲区
+  static float xs_buffer[N / GS];
+  
+  // 优化数组分区 - 添加complete选项确保完全分区
+  #pragma HLS ARRAY_PARTITION variable=x_buffer type=cyclic factor=16 complete
+  #pragma HLS ARRAY_PARTITION variable=xs_buffer type=cyclic factor=4 complete
 
-  // 优化数组分区策略
-  #pragma HLS ARRAY_PARTITION variable=x_buffer cyclic factor=16
-  #pragma HLS ARRAY_PARTITION variable=xs_buffer cyclic factor=4
-  #pragma HLS ARRAY_PARTITION variable=w_buffer cyclic factor=32
-  #pragma HLS ARRAY_PARTITION variable=ws_buffer cyclic factor=4
-
-  // 加载输入向量 - 只执行一次
+  // 加载输入向量 - 添加流水线指令
   x_buff:
   for (int i = 0; i < N; i++) {
+    #pragma HLS PIPELINE II=1
     #pragma HLS UNROLL factor=16
     x_buffer[i] = xq[i];
   }
   
-  // 加载输入缩放因子 - 只执行一次
+  // 加载输入缩放因子 - 添加边界保护
   xs_buff:
-  for (int j = 0; j < groups; j++) {
+  for (int j = 0; j < N; j += GS) {
+    #pragma HLS PIPELINE II=1
     #pragma HLS UNROLL factor=4
-    xs_buffer[j] = xs[j];
+    if (j < N - GS + 1) { // 确保不越界
+      xs_buffer[j / GS] = xs[j / GS];
+    }
   }
 
-  // 主处理循环 - 按行处理权重矩阵
+  // 主处理循环 - 关键优化区域
   row_loop:
   for (int i = 0; i < D; i++) {
-    #pragma HLS PIPELINE II=8  // 放宽流水线约束
+    #pragma HLS PIPELINE II=8 // 放宽流水线约束
     
-    // 预加载当前行的权重
-    const int row_offset = i * N;
-    w_load:
+    // 使用静态数组避免栈分配
+    static int8_t w_buffer[N];
+    static float ws_buffer[N / GS];
+    
+    // 优化数组分区 - 添加complete选项
+    #pragma HLS ARRAY_PARTITION variable=w_buffer type=cyclic factor=32 complete
+    #pragma HLS ARRAY_PARTITION variable=ws_buffer type=cyclic factor=32 complete
+
+    // 预加载当前行的权重 - 添加流水线指令
+    const int in = i * N;
+    matmul1:
     for (int j = 0; j < N; j++) {
+      #pragma HLS PIPELINE II=1
       #pragma HLS UNROLL factor=32
-      w_buffer[j] = wq[row_offset + j];
+      w_buffer[j] = wq[j + in];
     }
     
-    // 预加载当前行的缩放因子
-    const int scale_offset = i * groups;
-    ws_load:
+    // 预加载当前行的缩放因子 - 添加边界保护
+    const int in_s = i * (N / GS);
+    const int groups = N / GS;
+    matmul2:
     for (int j = 0; j < groups; j++) {
-      #pragma HLS UNROLL factor=4
-      ws_buffer[j] = ws[scale_offset + j];
+      #pragma HLS PIPELINE II=1
+      #pragma HLS UNROLL factor=32
+      if (j < groups) {
+        ws_buffer[j] = ws[in_s + j];
+      }
     }
 
-    // 计算点积（分组处理）- 保持原始循环结构
+    // 计算点积 - 核心优化
     float val = 0.0f;
-    int j;
     matmul3:
-    for (j = 0; j <= N - GS; j += GS) {
-      #pragma HLS UNROLL factor=4  // 部分展开组循环
+    for (int j = 0; j <= N - GS; j += GS) {
+      #pragma HLS PIPELINE II=1 // 添加流水线指令
+      #pragma HLS UNROLL factor=4 // 部分展开组循环
       
       int32_t ival = 0;
       matmul4:
       for (int k = 0; k < GS; k++) {
         #pragma HLS UNROLL
-        ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
+        // 添加边界保护
+        if (j + k < N) {
+          ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
+        }
       }
-      val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
+      // 添加边界保护
+      if (j / GS < N / GS) {
+        val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
+      }
     }
-    
     xout[i] = val;
   }
 }
