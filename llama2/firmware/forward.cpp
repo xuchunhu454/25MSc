@@ -253,7 +253,7 @@ void matmul_1(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 }
 
 template <int N, int D, int GS>
-void matmul(float *xout,
+void matmul_2(float *xout,
             const int8_t *xq, const float *xs,
             const int8_t *wq, const float *ws)
 {
@@ -316,7 +316,74 @@ void matmul(float *xout,
   }
 }
 
+template <int N, int D, int GS>
+void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
+{
+  // 使用静态存储避免栈溢出
+  static int8_t x_buffer[N];
+  static float xs_buffer[N / GS];
+  static int8_t w_buffer[N];  // 行权重缓冲区
+  static float ws_buffer[N / GS];  // 行缩放因子缓冲区
 
+  // 优化数组分区策略
+  #pragma HLS ARRAY_PARTITION variable=x_buffer cyclic factor=16
+  #pragma HLS ARRAY_PARTITION variable=xs_buffer cyclic factor=4
+  #pragma HLS ARRAY_PARTITION variable=w_buffer cyclic factor=32
+  #pragma HLS ARRAY_PARTITION variable=ws_buffer cyclic factor=4
+
+  // 加载输入向量 - 只执行一次
+  x_buff:
+  for (int i = 0; i < N; i++) {
+    #pragma HLS UNROLL factor=16
+    x_buffer[i] = xq[i];
+  }
+  
+  // 加载输入缩放因子 - 只执行一次
+  xs_buff:
+  for (int j = 0; j < N / GS; j++) {
+    #pragma HLS UNROLL factor=4
+    xs_buffer[j] = xs[j];
+  }
+
+  // 主处理循环 - 按行处理权重矩阵
+  row_loop:
+  for (int i = 0; i < D; i++) {
+    #pragma HLS PIPELINE II=8  // 放宽流水线约束
+    
+    // 预加载当前行的权重
+    const int row_offset = i * N;
+    w_load:
+    for (int j = 0; j < N; j++) {
+      #pragma HLS UNROLL factor=32
+      w_buffer[j] = wq[row_offset + j];
+    }
+    
+    // 预加载当前行的缩放因子
+    const int scale_offset = i * (N / GS);
+    ws_load:
+    for (int j = 0; j < N / GS; j++) {
+      #pragma HLS UNROLL factor=4
+      ws_buffer[j] = ws[scale_offset + j];
+    }
+
+    // 计算点积（分组处理）
+    float val = 0.0f;
+    group_loop:
+    for (int j = 0; j < N; j += GS) {
+      #pragma HLS UNROLL factor=4  // 部分展开组循环
+      
+      int32_t ival = 0;
+      dot_product:
+      for (int k = 0; k < GS; k++) {
+        #pragma HLS UNROLL
+        ival += (int32_t)x_buffer[j + k] * (int32_t)w_buffer[j + k];
+      }
+      val += (float)ival * ws_buffer[j / GS] * xs_buffer[j / GS];
+    }
+    
+    xout[i] = val;
+  }
+}
 
 // inline int8_t decode_int4(int8_t packed, int idx) {
 //   int val = (idx % 2 == 0) ? (packed & 0x0F) : ((packed >> 4) & 0x0F);
