@@ -317,7 +317,7 @@ void matmul_2(float *xout,
 }
 
 template <int N, int D>
-void matmul_1(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
+void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
   // W (d,n) @ x (n,) -> xout (d,)
   // 保留所有原始注释和结构
@@ -404,6 +404,7 @@ void matmul_1(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
     xout[i] = val;
   }
 }
+
 // inline int8_t decode_int4(int8_t packed, int idx) {
 //   int val = (idx % 2 == 0) ? (packed & 0x0F) : ((packed >> 4) & 0x0F);
 //   // Convert to a signed value (0~15 → -8~7)
