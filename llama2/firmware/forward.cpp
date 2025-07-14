@@ -252,55 +252,66 @@ void matmul_1(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
   }
 }
 
-template <int N, int D>
+template <int N, int D, int GS>
 void matmul(float *xout,
             const int8_t *xq, const float *xs,
             const int8_t *wq, const float *ws)
 {
-  // 1) 缓存输入向量——几 KB
-  int8_t  xq_local[N];
-  float   xs_local[N/GS];
+  // 使用静态存储避免栈溢出
+  static int8_t xq_local[N];
+  static float xs_local[N/GS];
+  static int8_t wq_row[N];
+  static float ws_row[N/GS];
+  
   #pragma HLS ARRAY_PARTITION variable=xq_local cyclic factor=16
   #pragma HLS ARRAY_PARTITION variable=xs_local cyclic factor=4
-  copy_x:
-  for (int i = 0; i < N; i++)
-  #pragma HLS UNROLL factor=16
-      xq_local[i] = xq[i];
-  copy_xs:
-  for (int i = 0; i < N/GS; i++)
-  #pragma HLS UNROLL factor=4
-      xs_local[i] = xs[i];
+  #pragma HLS ARRAY_PARTITION variable=wq_row cyclic factor=32
+  #pragma HLS ARRAY_PARTITION variable=ws_row cyclic factor=4
 
-  // 2) 主循环：每次只 preload 一行权重 —— 也只是几 KB
+  // 1. 缓存输入向量
+  copy_x:
+  for (int i = 0; i < N; i++) {
+    #pragma HLS UNROLL factor=16
+    if (i < N) xq_local[i] = xq[i];
+  }
+  
+  copy_xs:
+  for (int i = 0; i < N/GS; i++) {
+    #pragma HLS UNROLL factor=4
+    if (i < N/GS) xs_local[i] = xs[i];
+  }
+
+  // 2. 行处理主循环
   row_loop:
   for (int d = 0; d < D; d++) {
-    #pragma HLS PIPELINE II=1
+    #pragma HLS PIPELINE II=8  // 放宽流水线约束
 
-    int8_t wq_row[N];
-    float  ws_row[N/GS];
-    #pragma HLS ARRAY_PARTITION variable=wq_row cyclic factor=32
-    #pragma HLS ARRAY_PARTITION variable=ws_row cyclic factor=4
-
+    // 预载权重行
     preload_w:
-    for (int j = 0; j < N; j++)
-    #pragma HLS UNROLL factor=32
-        wq_row[j] = wq[d*N + j];
+    for (int j = 0; j < N; j++) {
+      #pragma HLS UNROLL factor=32
+      if (j < N) wq_row[j] = wq[d*N + j];
+    }
+    
     preload_ws:
-    for (int j = 0; j < N/GS; j++)
-    #pragma HLS UNROLL factor=4
-        ws_row[j] = ws[d*(N/GS) + j];
+    for (int j = 0; j < N/GS; j++) {
+      #pragma HLS UNROLL factor=4
+      if (j < N/GS) ws_row[j] = ws[d*(N/GS) + j];
+    }
 
-    // 3) 内部点乘
+    // 3. 点积计算
     float acc = 0.0f;
     dot_outer:
     for (int j = 0; j < N; j += GS) {
       int32_t ival = 0;
       dot_inner:
-      for (int k = 0; k < GS; k++)
-      #pragma HLS UNROLL
-          ival += (int32_t)xq_local[j+k] * (int32_t)wq_row[j+k];
-      acc += (float)ival * ws_row[j/GS] * xs_local[j/GS];
+      for (int k = 0; k < GS; k++) {
+        #pragma HLS UNROLL
+        if (j+k < N) ival += (int32_t)xq_local[j+k] * (int32_t)wq_row[j+k];
+      }
+      if (j/GS < N/GS) acc += (float)ival * ws_row[j/GS] * xs_local[j/GS];
     }
+    
     xout[d] = acc;
   }
 }
