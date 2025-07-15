@@ -338,9 +338,14 @@ void matmul(
     #pragma HLS INTERFACE s_axilite port=xout bundle=control
     #pragma HLS INTERFACE s_axilite port=return bundle=control
 
-    // -- local buffers (no 'static' so HLS can remap & partition) --
-    int8_t  x_buffer[N];
-    float   xs_buffer[N / GS];
+    // 在 CSim 时用 static 避免栈溢出；Synth 时用局部数组便于 HLS 映射
+    #ifdef __SYNTHESIS__
+        int8_t x_buffer[N];
+        float  xs_buffer[N/GS];
+    #else
+        static int8_t x_buffer[N];
+        static float  xs_buffer[N/GS];
+    #endif
 
     #pragma HLS ARRAY_PARTITION variable=x_buffer  type=cyclic factor=16
     #pragma HLS ARRAY_PARTITION variable=xs_buffer type=cyclic factor=4
