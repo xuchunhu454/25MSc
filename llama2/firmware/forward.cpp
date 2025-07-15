@@ -317,93 +317,93 @@ void matmul_2(float *xout,
 }
 
 template <int N, int D>
-void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
-{
-  // W (d,n) @ x (n,) -> xout (d,)
-  // 保留所有原始注释和结构
-  static int8_t x_buffer[N];
-  static float xs_buffer[N / GS];
-  
-  // 优化数组分区 - 添加complete选项确保完全分区
-  #pragma HLS ARRAY_PARTITION variable=x_buffer type=cyclic factor=16 complete
-  #pragma HLS ARRAY_PARTITION variable=xs_buffer type=cyclic factor=4 complete
+void matmul(
+    float   * __restrict xout,
+    int8_t  * __restrict xq,
+    float   * __restrict xs,
+    int8_t  * __restrict wq,
+    float   * __restrict ws
+) {
+    // AXI‑Master data interfaces to separate bundles (increase bandwidth)
+    #pragma HLS INTERFACE m_axi port=xq  bundle=gmem0 depth=N
+    #pragma HLS INTERFACE m_axi port=xs  bundle=gmem0 depth=N/GS
+    #pragma HLS INTERFACE m_axi port=wq  bundle=gmem1 depth=N*D
+    #pragma HLS INTERFACE m_axi port=ws  bundle=gmem1 depth=(N/GS)*D
+    #pragma HLS INTERFACE m_axi port=xout bundle=gmem2 depth=D
+    // AXI‑Lite control interface
+    #pragma HLS INTERFACE s_axilite port=xq   bundle=control
+    #pragma HLS INTERFACE s_axilite port=xs   bundle=control
+    #pragma HLS INTERFACE s_axilite port=wq   bundle=control
+    #pragma HLS INTERFACE s_axilite port=ws   bundle=control
+    #pragma HLS INTERFACE s_axilite port=xout bundle=control
+    #pragma HLS INTERFACE s_axilite port=return bundle=control
 
-  // 加载输入向量 - 添加流水线指令
-  x_buff:
-  for (int i = 0; i < N; i++) {
-    #pragma HLS PIPELINE II=1
-    #pragma HLS UNROLL factor=16
-    x_buffer[i] = xq[i];
-  }
-  
-  // 加载输入缩放因子 - 添加边界保护
-  xs_buff:
-  for (int j = 0; j < N; j += GS) {
-    #pragma HLS PIPELINE II=1
-    #pragma HLS UNROLL factor=4
-    if (j < N - GS + 1) { // 确保不越界
-      xs_buffer[j / GS] = xs[j / GS];
+    // -- local buffers (no 'static' so HLS can remap & partition) --
+    int8_t  x_buffer[N];
+    float   xs_buffer[N / GS];
+
+    #pragma HLS ARRAY_PARTITION variable=x_buffer  type=cyclic factor=16
+    #pragma HLS ARRAY_PARTITION variable=xs_buffer type=cyclic factor=4
+
+    // preload xq into x_buffer
+    x_buff:
+    for (int i = 0; i < N; i++) {
+        #pragma HLS UNROLL factor=16
+        x_buffer[i] = xq[i];
     }
-  }
-
-  // 主处理循环 - 关键优化区域
-  row_loop:
-  for (int i = 0; i < D; i++) {
-    #pragma HLS PIPELINE II=8 // 放宽流水线约束
-    
-    // 使用静态数组避免栈分配
-    static int8_t w_buffer[N];
-    static float ws_buffer[N / GS];
-    
-    // 优化数组分区 - 添加complete选项
-    #pragma HLS ARRAY_PARTITION variable=w_buffer type=cyclic factor=32 complete
-    #pragma HLS ARRAY_PARTITION variable=ws_buffer type=cyclic factor=32 complete
-
-    // 预加载当前行的权重 - 添加流水线指令
-    const int in = i * N;
-    matmul1:
-    for (int j = 0; j < N; j++) {
-      #pragma HLS PIPELINE II=1
-      #pragma HLS UNROLL factor=32
-      w_buffer[j] = wq[j + in];
-    }
-    
-    // 预加载当前行的缩放因子 - 添加边界保护
-    const int in_s = i * (N / GS);
-    const int groups = N / GS;
-    matmul2:
-    for (int j = 0; j < groups; j++) {
-      #pragma HLS PIPELINE II=1
-      #pragma HLS UNROLL factor=32
-      if (j < groups) {
-        ws_buffer[j] = ws[in_s + j];
-      }
-    }
-
-    // 计算点积 - 核心优化
-    float val = 0.0f;
-    matmul3:
+    // preload xs into xs_buffer
+    xs_buff:
     for (int j = 0; j <= N - GS; j += GS) {
-      #pragma HLS PIPELINE II=1 // 添加流水线指令
-      #pragma HLS UNROLL factor=4 // 部分展开组循环
-      
-      int32_t ival = 0;
-      matmul4:
-      for (int k = 0; k < GS; k++) {
-        #pragma HLS UNROLL
-        // 添加边界保护
-        if (j + k < N) {
-          ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
-        }
-      }
-      // 添加边界保护
-      if (j / GS < N / GS) {
-        val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
-      }
+        #pragma HLS UNROLL factor=4
+        xs_buffer[j / GS] = xs[j / GS];
     }
-    xout[i] = val;
-  }
+
+    // main row loop
+    for (int i = 0; i < D; i++) {
+        #pragma HLS PIPELINE II=1
+        float val = 0.0f;
+
+        // per‑row buffers
+        int8_t  w_buffer[N];
+        float   ws_buffer[N / GS];
+        #pragma HLS ARRAY_PARTITION variable=w_buffer  type=cyclic factor=32
+        #pragma HLS ARRAY_PARTITION variable=ws_buffer type=cyclic factor=32
+
+        // load quantized weights
+        const int in   = i * N;
+        matmul1:
+        for (int j = 0; j < N; j++) {
+            #pragma HLS UNROLL factor=32
+            w_buffer[j] = wq[in + j];
+        }
+
+        // load per‑group scales
+        const int in_s   = i * N / GS;
+        const int groups = N / GS;
+        matmul2:
+        for (int j = 0; j < groups; j++) {
+            #pragma HLS UNROLL factor=32
+            ws_buffer[j] = ws[in_s + j];
+        }
+
+        // dot‑product in chunks of GS
+        matmul3:
+        for (int j = 0; j <= N - GS; j += GS) {
+            #pragma HLS UNROLL factor=32
+            int32_t ival = 0;
+        matmul4:
+            for (int k = 0; k < GS; k++) {
+                #pragma HLS UNROLL
+                ival += (int32_t)x_buffer[j + k] * (int32_t)w_buffer[j + k];
+            }
+            int grp = j / GS;
+            val += (float)ival * ws_buffer[grp] * xs_buffer[grp];
+        }
+
+        xout[i] = val;
+    }
 }
+
 
 // inline int8_t decode_int4(int8_t packed, int idx) {
 //   int val = (idx % 2 == 0) ? (packed & 0x0F) : ((packed >> 4) & 0x0F);
