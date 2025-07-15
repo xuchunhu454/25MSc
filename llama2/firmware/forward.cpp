@@ -224,14 +224,14 @@ void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
     const int in = i * N;
     matmul1:
     for (int j = 0; j < N; j++) {
-      #pragma HLS UNROLL factor = 32
+      // #pragma HLS UNROLL factor
       w_buffer[j] = wq[j + in];
     }
     matmul2:
     const int in_s = i * N / GS;
     const int groups = N / GS;
     for (int j = 0; j < groups; j++) {
-      #pragma HLS UNROLL factor = 32
+      // #pragma HLS UNROLL factor
       ws_buffer[j] = ws[in_s + j];
     }
 
@@ -239,11 +239,11 @@ void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
     int j;
     matmul3:
     for (j = 0; j <= N - GS; j += GS) {
-      
+      // #pragma HLS UNROLL
       int32_t ival = 0;
       matmul4:
       for (int k = 0; k < GS; k++) {
-        #pragma HLS UNROLL
+        // #pragma HLS UNROLL
         ival += ((int32_t)x_buffer[j + k]) * ((int32_t)w_buffer[j + k]);
       }
       val += ((float)ival) * ws_buffer[j / GS] * xs_buffer[j / GS];
