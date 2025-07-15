@@ -181,7 +181,7 @@ void matmul_old(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 
 
 template <int N, int D>
-void matmul_1(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
+void matmul(float *xout, int8_t *xq, float *xs, int8_t *wq, float *ws)
 {
   // W (d,n) @ x (n,) -> xout (d,)
   // by far the most amount of time is spent inside this little function
@@ -316,98 +316,98 @@ void matmul_2(float *xout,
   }
 }
 
-template <int N, int D>
-void matmul(
-    float   * __restrict xout,
-    int8_t  * __restrict xq,
-    float   * __restrict xs,
-    int8_t  * __restrict wq,
-    float   * __restrict ws
-) {
-    // AXI‑Master data interfaces to separate bundles (increase bandwidth)
-    #pragma HLS INTERFACE m_axi port=xq  bundle=gmem0 depth=N
-    #pragma HLS INTERFACE m_axi port=xs  bundle=gmem0 depth=N/GS
-    #pragma HLS INTERFACE m_axi port=wq  bundle=gmem1 depth=N*D
-    #pragma HLS INTERFACE m_axi port=ws  bundle=gmem1 depth=(N/GS)*D
-    #pragma HLS INTERFACE m_axi port=xout bundle=gmem2 depth=D
-    // AXI‑Lite control interface
-    #pragma HLS INTERFACE s_axilite port=xq   bundle=control
-    #pragma HLS INTERFACE s_axilite port=xs   bundle=control
-    #pragma HLS INTERFACE s_axilite port=wq   bundle=control
-    #pragma HLS INTERFACE s_axilite port=ws   bundle=control
-    #pragma HLS INTERFACE s_axilite port=xout bundle=control
-    #pragma HLS INTERFACE s_axilite port=return bundle=control
+// template <int N, int D>
+// void matmul(
+//     float   * __restrict xout,
+//     int8_t  * __restrict xq,
+//     float   * __restrict xs,
+//     int8_t  * __restrict wq,
+//     float   * __restrict ws
+// ) {
+//     // AXI‑Master data interfaces to separate bundles (increase bandwidth)
+//     #pragma HLS INTERFACE m_axi port=xq  bundle=gmem0 depth=N
+//     #pragma HLS INTERFACE m_axi port=xs  bundle=gmem0 depth=N/GS
+//     #pragma HLS INTERFACE m_axi port=wq  bundle=gmem1 depth=N*D
+//     #pragma HLS INTERFACE m_axi port=ws  bundle=gmem1 depth=(N/GS)*D
+//     #pragma HLS INTERFACE m_axi port=xout bundle=gmem2 depth=D
+//     // AXI‑Lite control interface
+//     #pragma HLS INTERFACE s_axilite port=xq   bundle=control
+//     #pragma HLS INTERFACE s_axilite port=xs   bundle=control
+//     #pragma HLS INTERFACE s_axilite port=wq   bundle=control
+//     #pragma HLS INTERFACE s_axilite port=ws   bundle=control
+//     #pragma HLS INTERFACE s_axilite port=xout bundle=control
+//     #pragma HLS INTERFACE s_axilite port=return bundle=control
 
-    // // 在 CSim 时用 static 避免栈溢出；Synth 时用局部数组便于 HLS 映射
-    // #ifdef __SYNTHESIS__
-    //     int8_t x_buffer[N];
-    //     float  xs_buffer[N/GS];
-    // #else
-    static int8_t x_buffer[N];
-    static float  xs_buffer[N/GS];
-    // #endif
+//     // // 在 CSim 时用 static 避免栈溢出；Synth 时用局部数组便于 HLS 映射
+//     // #ifdef __SYNTHESIS__
+//     //     int8_t x_buffer[N];
+//     //     float  xs_buffer[N/GS];
+//     // #else
+//     static int8_t x_buffer[N];
+//     static float  xs_buffer[N/GS];
+//     // #endif
 
-    #pragma HLS ARRAY_PARTITION variable=x_buffer  type=cyclic factor=16
-    #pragma HLS ARRAY_PARTITION variable=xs_buffer type=cyclic factor=4
+//     #pragma HLS ARRAY_PARTITION variable=x_buffer  type=cyclic factor=16
+//     #pragma HLS ARRAY_PARTITION variable=xs_buffer type=cyclic factor=4
 
-    // preload xq into x_buffer
-    x_buff:
-    for (int i = 0; i < N; i++) {
-        #pragma HLS UNROLL factor=16
-        x_buffer[i] = xq[i];
-    }
-    // preload xs into xs_buffer
-    xs_buff:
-    for (int j = 0; j <= N - GS; j += GS) {
-        #pragma HLS UNROLL factor=4
-        xs_buffer[j / GS] = xs[j / GS];
-    }
+//     // preload xq into x_buffer
+//     x_buff:
+//     for (int i = 0; i < N; i++) {
+//         #pragma HLS UNROLL factor=16
+//         x_buffer[i] = xq[i];
+//     }
+//     // preload xs into xs_buffer
+//     xs_buff:
+//     for (int j = 0; j <= N - GS; j += GS) {
+//         #pragma HLS UNROLL factor=4
+//         xs_buffer[j / GS] = xs[j / GS];
+//     }
 
-    // main row loop
-    for (int i = 0; i < D; i++) {
-        #pragma HLS PIPELINE II=1
-        float val = 0.0f;
+//     // main row loop
+//     for (int i = 0; i < D; i++) {
+//         #pragma HLS PIPELINE II=1
+//         float val = 0.0f;
 
-        // per‑row buffers
-        int8_t  w_buffer[N];
-        float   ws_buffer[N / GS];
-        #pragma HLS ARRAY_PARTITION variable=w_buffer  type=cyclic factor=32
-        #pragma HLS ARRAY_PARTITION variable=ws_buffer type=cyclic factor=32
+//         // per‑row buffers
+//         int8_t  w_buffer[N];
+//         float   ws_buffer[N / GS];
+//         #pragma HLS ARRAY_PARTITION variable=w_buffer  type=cyclic factor=32
+//         #pragma HLS ARRAY_PARTITION variable=ws_buffer type=cyclic factor=32
 
-        // load quantized weights
-        const int in   = i * N;
-        matmul1:
-        for (int j = 0; j < N; j++) {
-            #pragma HLS UNROLL factor=32
-            w_buffer[j] = wq[in + j];
-        }
+//         // load quantized weights
+//         const int in   = i * N;
+//         matmul1:
+//         for (int j = 0; j < N; j++) {
+//             #pragma HLS UNROLL factor=32
+//             w_buffer[j] = wq[in + j];
+//         }
 
-        // load per‑group scales
-        const int in_s   = i * N / GS;
-        const int groups = N / GS;
-        matmul2:
-        for (int j = 0; j < groups; j++) {
-            #pragma HLS UNROLL factor=32
-            ws_buffer[j] = ws[in_s + j];
-        }
+//         // load per‑group scales
+//         const int in_s   = i * N / GS;
+//         const int groups = N / GS;
+//         matmul2:
+//         for (int j = 0; j < groups; j++) {
+//             #pragma HLS UNROLL factor=32
+//             ws_buffer[j] = ws[in_s + j];
+//         }
 
-        // dot‑product in chunks of GS
-        matmul3:
-        for (int j = 0; j <= N - GS; j += GS) {
-            #pragma HLS UNROLL factor=32
-            int32_t ival = 0;
-        matmul4:
-            for (int k = 0; k < GS; k++) {
-                #pragma HLS UNROLL
-                ival += (int32_t)x_buffer[j + k] * (int32_t)w_buffer[j + k];
-            }
-            int grp = j / GS;
-            val += (float)ival * ws_buffer[grp] * xs_buffer[grp];
-        }
+//         // dot‑product in chunks of GS
+//         matmul3:
+//         for (int j = 0; j <= N - GS; j += GS) {
+//             #pragma HLS UNROLL factor=32
+//             int32_t ival = 0;
+//         matmul4:
+//             for (int k = 0; k < GS; k++) {
+//                 #pragma HLS UNROLL
+//                 ival += (int32_t)x_buffer[j + k] * (int32_t)w_buffer[j + k];
+//             }
+//             int grp = j / GS;
+//             val += (float)ival * ws_buffer[grp] * xs_buffer[grp];
+//         }
 
-        xout[i] = val;
-    }
-}
+//         xout[i] = val;
+//     }
+// }
 
 
 // inline int8_t decode_int4(int8_t packed, int idx) {
